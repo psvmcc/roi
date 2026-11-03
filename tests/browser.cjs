@@ -524,8 +524,30 @@ async function freePorts() {
     assert.ok(icon.headers()['content-type'].includes('image/svg+xml'));
     assert.equal(await page.locator('link[rel=icon]').getAttribute('href'), '/assets/favicon.svg');
     assert.equal(await page.locator('.app-header h1').innerText(), 'ροή');
-    await page.setViewportSize({ width: 390, height: 844 });
-    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+    async function assertMobileLayout(width) {
+      await page.setViewportSize({ width, height: 844 });
+      const layout = await page.evaluate(() => {
+        const viewport = document.documentElement.clientWidth;
+        const overflowing = [...document.querySelectorAll('body *')].filter(element => {
+          // Wide tables are intentionally scrollable inside their containers.
+          if (element.closest('.scroll') || !element.getClientRects().length) return false;
+          const bounds = element.getBoundingClientRect();
+          return bounds.right > viewport + 1 || bounds.left < -1;
+        }).map(element => ({ tag: element.tagName, id: element.id, class: element.className,
+          text: element.textContent.trim().slice(0, 100), width: element.getBoundingClientRect().width }));
+        return { viewport, pageWidth: document.documentElement.scrollWidth, overflowing };
+      });
+      if (layout.pageWidth > layout.viewport && process.env.ROI_SCREENSHOT_DIR) {
+        fs.mkdirSync(process.env.ROI_SCREENSHOT_DIR, { recursive: true });
+        await page.screenshot({ path: path.join(process.env.ROI_SCREENSHOT_DIR, `overflow-${width}.png`), fullPage: true });
+      }
+      assert.ok(layout.pageWidth <= layout.viewport, 'Horizontal page overflow: ' + JSON.stringify(layout));
+    }
+    for (const width of [390, 320]) await assertMobileLayout(width);
+    const originalVersion = await page.locator('.build-version').innerText();
+    await page.locator('.build-version').evaluate(element => element.textContent = 'v1.2.3-release-candidate.123 (123456789abc)');
+    for (const width of [390, 320]) await assertMobileLayout(width);
+    await page.locator('.build-version').evaluate((element, text) => element.textContent = text, originalVersion);
     // A full pending queue cannot hide an approved device permanently.
     for (let i = 0; i < 100; i++) {
       const pending = await context.request.post(api + '/accounts/ClientLogin', { form: { Email: 'reader', Passwd: 'roi-reader-test' } });

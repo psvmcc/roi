@@ -1,111 +1,18 @@
 name: CI
 on:
-  workflow_call:
-    inputs:
-      skip_container_checks:
-        type: boolean
-        required: false
-        default: false
-  push:
-    branches-ignore: [main]
-    tags-ignore: ['**']
   pull_request:
 permissions:
   contents: read
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ci-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 jobs:
-  check:
+  verify:
+    name: Check, test and build
     runs-on: ubuntu-latest
+    timeout-minutes: 35
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          go-version-file: go.mod
-          cache: true
-      - name: Check formatting
-        run: test -z "$(gofmt -l cmd internal)"
-      - run: python3 -m unittest discover -s tests -p 'test_*.py'
-      - name: Validate GitHub Actions workflows
-        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 .github/workflows/*.yml
-      - run: shellcheck scripts/build.sh scripts/container-smoke.sh
-      - name: Validate Quadlet with the Podman generator
-        run: |
-          generator=/usr/lib/systemd/system-generators/podman-system-generator
-          if [ ! -x "$generator" ]; then
-            sudo apt-get update
-            sudo apt-get install -y podman
-          fi
-          QUADLET_UNIT_DIRS="$PWD/examples" "$generator" --dryrun > "$RUNNER_TEMP/roi.service"
-          grep -q 'ExecStart=' "$RUNNER_TEMP/roi.service"
-          grep -q 'ghcr.io/psvmcc/roi:stable' "$RUNNER_TEMP/roi.service"
-      - run: go mod download
-      - run: go vet ./...
-      - run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...
-      - run: go test -race -count=1 -covermode=atomic -coverprofile=coverage.out ./...
-      - name: Require 90 percent statement coverage
-        run: go tool cover -func=coverage.out | awk '/^total:/ { sub(/%$/, "", $3); print; if ($3 < 90) exit 1 }'
-      - run: go test ./internal/roi -run '^$' -fuzz '^FuzzItemIDRoundTrip$' -fuzztime=10s -parallel=2
-      - run: go test ./internal/roi -run '^$' -fuzz '^FuzzSubscriptionDocuments$' -fuzztime=10s -parallel=2
-      - run: go test ./internal/roi -run '^$' -fuzz '^FuzzGitwebDocuments$' -fuzztime=10s -parallel=2
-      - run: go test ./internal/roi -run '^$' -bench '^BenchmarkLargeArchiveMetadata$' -benchtime=1x -benchmem
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: go-coverage
-          path: coverage.out
-      - run: CGO_ENABLED=0 go test -count=1 ./...
-      - run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
-      - name: Build
-        run: CGO_ENABLED=0 go build -trimpath -o bin/roi ./cmd/roi
-  container:
-    if: ${{ !inputs.skip_container_checks }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-      - name: Build minimal image
-        run: docker build --build-arg ROI_COMMIT="$GITHUB_SHA" --build-arg ROI_VERSION="${GITHUB_REF_NAME//\//-}" -t roi:ci .
-      - name: Smoke test as nonroot
-        run: sh scripts/container-smoke.sh roi:ci
-
-  browser:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
-        with:
-          go-version-file: go.mod
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
-        with:
-          node-version: '24'
-      - run: CGO_ENABLED=0 go build -o bin/roi ./cmd/roi
-      - name: Install browser test tools outside the source tree
-        run: |
-          npm install --prefix "$RUNNER_TEMP/roi-browser" --no-package-lock --no-audit --no-fund playwright@1.64.1
-          "$RUNNER_TEMP/roi-browser/node_modules/.bin/playwright" install --with-deps chromium
-      - name: Browser integration
-        env:
-          PLAYWRIGHT_MODULE: ${{ runner.temp }}/roi-browser/node_modules/playwright
-        run: node tests/browser.cjs
-
-  artifacts:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
-        with:
-          go-version-file: go.mod
-      - name: Build static binary
-        env:
-          GOOS: linux
-          GOARCH: amd64
-          CGO_ENABLED: '0'
-        run: |
-          mkdir -p dist
-          sh scripts/build.sh "dist/roi-linux-${GOARCH}"
-      - name: Generate CycloneDX SBOM and SHA-256 checksum
-        run: python3 scripts/artifacts.py dist/roi-linux-amd64
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: roi-linux-amd64
-          path: dist/
+          persist-credentials: false
+      - uses: ./.github/actions/verify

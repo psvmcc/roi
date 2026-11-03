@@ -1,0 +1,119 @@
+name: Verify roi
+description: Check, test, build and smoke-test Linux amd64 on one runner
+inputs:
+  image:
+    description: Local image tag to build and test
+    required: false
+    default: roi:ci
+  version:
+    description: Build version
+    required: false
+    default: ci
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      with:
+        go-version-file: go.mod
+        cache-dependency-path: go.sum
+    - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version: '24'
+        package-manager-cache: false
+    - name: Check formatting
+      shell: bash
+      run: test -z "$(gofmt -l cmd internal)"
+    - name: Test release and artifact tooling
+      shell: bash
+      run: python3 -m unittest discover -s tests -p 'test_*.py'
+    - name: Validate workflows and shell scripts
+      shell: bash
+      run: |
+        go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 .github/workflows/*.yml
+        shellcheck scripts/build.sh scripts/container-smoke.sh
+    - name: Validate Quadlet with the Podman generator
+      shell: bash
+      run: |
+        generator=/usr/lib/systemd/system-generators/podman-system-generator
+        if [ ! -x "$generator" ]; then
+          sudo apt-get update
+          sudo apt-get install -y podman
+        fi
+        QUADLET_UNIT_DIRS="$GITHUB_WORKSPACE/examples" "$generator" --dryrun > "$RUNNER_TEMP/roi.service"
+        grep -q 'ExecStart=' "$RUNNER_TEMP/roi.service"
+        grep -q 'ghcr.io/psvmcc/roi:stable' "$RUNNER_TEMP/roi.service"
+    - name: Download Go modules
+      shell: bash
+      run: go mod download
+    - name: Vet and staticcheck
+      shell: bash
+      run: |
+        go vet ./...
+        go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...
+    - name: Race tests and coverage
+      shell: bash
+      run: |
+        mkdir -p .coverage
+        go test -race -count=1 -covermode=atomic -coverprofile=.coverage/coverage.out ./...
+        go tool cover -func=.coverage/coverage.out | awk '/^total:/ { sub(/%$/, "", $3); print; if ($3 < 90) exit 1 }'
+    - name: Test without CGO
+      shell: bash
+      run: CGO_ENABLED=0 go test -count=1 ./...
+    - name: Check reachable vulnerabilities
+      shell: bash
+      run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+    - name: Fuzz parsers
+      shell: bash
+      run: |
+        go test ./internal/roi -run '^$' -fuzz '^FuzzItemIDRoundTrip$' -fuzztime=10s -parallel=2
+        go test ./internal/roi -run '^$' -fuzz '^FuzzSubscriptionDocuments$' -fuzztime=10s -parallel=2
+        go test ./internal/roi -run '^$' -fuzz '^FuzzGitwebDocuments$' -fuzztime=10s -parallel=2
+    - name: Benchmark archive metadata
+      shell: bash
+      run: go test ./internal/roi -run '^$' -bench '^BenchmarkLargeArchiveMetadata$' -benchtime=1x -benchmem
+    - name: Build Linux amd64 executable and inventory
+      shell: bash
+      env:
+        GOOS: linux
+        GOARCH: amd64
+        CGO_ENABLED: '0'
+        ROI_VERSION: ${{ inputs.version }}
+        ROI_COMMIT: ${{ github.sha }}
+      run: |
+        sh scripts/build.sh dist/roi-linux-amd64
+        python3 scripts/artifacts.py dist/roi-linux-amd64
+    - name: Install browser test tools outside the source tree
+      shell: bash
+      run: |
+        npm install --prefix "$RUNNER_TEMP/roi-browser" --no-package-lock --no-audit --no-fund playwright@1.64.1
+        "$RUNNER_TEMP/roi-browser/node_modules/.bin/playwright" install --with-deps chromium
+    - name: Browser integration
+      shell: bash
+      env:
+        PLAYWRIGHT_MODULE: ${{ runner.temp }}/roi-browser/node_modules/playwright
+        ROI_BINARY: ${{ github.workspace }}/dist/roi-linux-amd64
+        ROI_SCREENSHOT_DIR: ${{ github.workspace }}/.coverage/ui
+      run: node tests/browser.cjs
+    - name: Build Linux amd64 image
+      shell: bash
+      env:
+        ROI_IMAGE: ${{ inputs.image }}
+        ROI_VERSION: ${{ inputs.version }}
+      run: |
+        docker build --platform linux/amd64 --build-arg ROI_VERSION="$ROI_VERSION" --build-arg ROI_COMMIT="$GITHUB_SHA" --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" --label "org.opencontainers.image.version=$ROI_VERSION" --label "org.opencontainers.image.revision=$GITHUB_SHA" -t "$ROI_IMAGE" .
+    - name: Smoke-test publishable image
+      shell: bash
+      env:
+        ROI_IMAGE: ${{ inputs.image }}
+      run: sh scripts/container-smoke.sh "$ROI_IMAGE"
+    - name: Upload executable, inventory and test diagnostics
+      if: ${{ always() }}
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: roi-linux-amd64
+        include-hidden-files: true
+        if-no-files-found: ignore
+        path: |
+          dist/
+          .coverage/coverage.out
+          .coverage/ui/

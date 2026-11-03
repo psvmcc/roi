@@ -25,7 +25,7 @@ vuln:
 
 check: fmt-check lint test test-pure vuln test-artifacts
 
-# Check Actions expressions, permissions and reusable-workflow interfaces.
+# Check Actions expressions, permissions and local action inputs.
 lint-actions:
     go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 .github/workflows/*.yml
 

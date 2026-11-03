@@ -8,51 +8,35 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 jobs:
-  verify:
-    uses: ./.github/workflows/ci.yml
-    with:
-      skip_container_checks: true
   release:
-    needs: verify
+    name: Check, test, build and publish release
     runs-on: ubuntu-latest
+    timeout-minutes: 35
     permissions:
       contents: write
       packages: write
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
       - name: Verify tag and main ancestry
         id: version
         env:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
           python3 scripts/release.py "$RELEASE_TAG" >> "$GITHUB_OUTPUT"
-          git fetch origin main
           git merge-base --is-ancestor "$GITHUB_SHA" origin/main
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
-        with:
-          go-version-file: go.mod
-      - name: Build amd64 binary and inventory
-        env:
-          GOOS: linux
-          GOARCH: amd64
-          CGO_ENABLED: '0'
-          ROI_VERSION: ${{ github.ref_name }}
-          ROI_COMMIT: ${{ github.sha }}
-        run: |
-          sh scripts/build.sh dist/roi-linux-amd64
-          python3 scripts/artifacts.py dist/roi-linux-amd64
-          cp examples/config.yaml examples/roi.container dist/
-      - name: Build release image
+      - name: Set image name
         env:
           RELEASE_TAG: ${{ github.ref_name }}
-        run: |
-          image="ghcr.io/${GITHUB_REPOSITORY,,}:$RELEASE_TAG"
-          echo "ROI_IMAGE=$image" >> "$GITHUB_ENV"
-          docker build --platform linux/amd64 --build-arg ROI_VERSION="$RELEASE_TAG" --build-arg ROI_COMMIT="$GITHUB_SHA" --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" --label "org.opencontainers.image.version=$RELEASE_TAG" --label "org.opencontainers.image.revision=$GITHUB_SHA" -t "$image" .
-      - name: Smoke-test release image
-        run: sh scripts/container-smoke.sh "$ROI_IMAGE"
+        run: echo "ROI_IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}:$RELEASE_TAG" >> "$GITHUB_ENV"
+      - uses: ./.github/actions/verify
+        with:
+          image: ${{ env.ROI_IMAGE }}
+          version: ${{ github.ref_name }}
+      - name: Include deployment examples
+        run: cp examples/config.yaml examples/roi.container dist/
       - name: Publish tested image
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

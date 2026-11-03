@@ -37,7 +37,8 @@ button:disabled { opacity: .55; cursor: wait; }
 input { font: inherit; color: var(--text); }
 input:not([type=checkbox]):not([type=file]):not([type=hidden]) { width: 100%; min-height: 36px; padding: 8px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 7px; }
 .app-header, .header-actions, .section-heading, .feed-controls, .opml-actions, .opml-actions form, .dialog-actions { display: flex; align-items: center; gap: 12px; }
-.app-header { justify-content: space-between; margin-bottom: 28px; }
+.app-header { justify-content: space-between; flex-wrap: wrap; margin-bottom: 28px; }
+.header-actions { flex-wrap: wrap; max-width: 100%; }
 .cards { display: grid; grid-template-columns: repeat(6,minmax(0,1fr)); gap: 12px; margin: 0 0 32px; }
 .card { background: var(--surface); border: 1px solid var(--border); padding: 18px; border-radius: 10px; }
 .card > span { color: var(--muted); font-size: 12px; }
@@ -160,7 +161,7 @@ button.icon-button.inline-edit, button.icon-button.inline-copy { width: calc(1em
 .feed-link .feed-url { min-width: 0; overflow-wrap: anywhere; }
 .copy-buffer { position: fixed; left: -10000px; top: 0; opacity: 0; }
 
-.build-version { font-size: .8rem; margin-right: auto; }
+.build-version { font-size: .8rem; margin-right: auto; min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
 
 #import-preview-dialog { width: min(1100px, calc(100vw - 40px)); }
 #import-preview-dialog .scroll { max-height: 50vh; }

@@ -8,27 +8,23 @@ concurrency:
   group: container-main
   cancel-in-progress: false
 jobs:
-  verify:
-    uses: ./.github/workflows/ci.yml
-    with:
-      skip_container_checks: true
   publish:
-    needs: verify
+    name: Check, test, build and publish latest
     runs-on: ubuntu-latest
+    timeout-minutes: 35
     permissions:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-      - name: Build amd64 image
-        env:
-          ROI_COMMIT: ${{ github.sha }}
-        run: |
-          image="ghcr.io/${GITHUB_REPOSITORY,,}:latest"
-          echo "ROI_IMAGE=$image" >> "$GITHUB_ENV"
-          docker build --platform linux/amd64 --build-arg ROI_VERSION=main --build-arg ROI_COMMIT="$ROI_COMMIT" --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" --label "org.opencontainers.image.revision=$ROI_COMMIT" -t "$image" .
-      - name: Smoke-test publishable image
-        run: sh scripts/container-smoke.sh "$ROI_IMAGE"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set image name
+        run: echo "ROI_IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}:latest" >> "$GITHUB_ENV"
+      - uses: ./.github/actions/verify
+        with:
+          image: ${{ env.ROI_IMAGE }}
+          version: main
       - name: Publish tested latest image
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
