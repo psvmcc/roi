@@ -1,18 +1,272 @@
-name: CI
+name: roi
 on:
+  push:
+    branches: [main]
+    tags: ['*.*.*']
   pull_request:
 permissions:
   contents: read
 concurrency:
-  group: ci-pr-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+  group: roi-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
-  verify:
-    name: Check, test and build
+  lint:
+    name: Linters
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 15
+    outputs:
+      image: ${{ steps.metadata.outputs.image }}
+      version: ${{ steps.metadata.outputs.version }}
+      prerelease: ${{ steps.metadata.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate release and set build metadata
+        id: metadata
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            python3 scripts/release.py "$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+            git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+            version="$GITHUB_REF_NAME"
+            tag="$GITHUB_REF_NAME"
+          elif [ "$GITHUB_EVENT_NAME" = push ]; then
+            version=main
+            tag=latest
+            echo prerelease=false >> "$GITHUB_OUTPUT"
+          else
+            version=ci
+            tag=ci
+            echo prerelease=false >> "$GITHUB_OUTPUT"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "image=ghcr.io/${GITHUB_REPOSITORY,,}:$tag" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - name: Check formatting
+        run: test -z "$(gofmt -l cmd internal)"
+      - name: Validate workflow and shell scripts
+        run: |
+          go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 .github/workflows/*.yml
+          shellcheck scripts/build.sh scripts/container-smoke.sh
+      - name: Validate Quadlet
+        run: |
+          generator=/usr/lib/systemd/system-generators/podman-system-generator
+          if [ ! -x "$generator" ]; then
+            sudo apt-get update
+            sudo apt-get install -y podman
+          fi
+          QUADLET_UNIT_DIRS="$GITHUB_WORKSPACE/examples" "$generator" --dryrun > "$RUNNER_TEMP/roi.service"
+          grep -q 'ExecStart=' "$RUNNER_TEMP/roi.service"
+          grep -q 'ghcr.io/psvmcc/roi:stable' "$RUNNER_TEMP/roi.service"
+      - name: Vet and staticcheck
+        run: |
+          go mod download
+          go vet ./...
+          go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...
+
+  tests:
+    name: Tests
+    needs: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: ./.github/actions/verify
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Test release and artifact tooling
+        run: python3 -m unittest discover -s tests -p 'test_*.py'
+      - name: Race tests and coverage
+        run: |
+          mkdir -p .coverage
+          go test -race -count=1 -covermode=atomic -coverprofile=.coverage/coverage.out ./...
+          go tool cover -func=.coverage/coverage.out | awk '/^total:/ { sub(/%$/, "", $3); print; if ($3 < 90) exit 1 }'
+      - name: Test without CGO
+        run: CGO_ENABLED=0 go test -count=1 ./...
+      - name: Check reachable vulnerabilities
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+      - name: Fuzz parsers
+        run: |
+          go test ./internal/roi -run '^$' -fuzz '^FuzzItemIDRoundTrip$' -fuzztime=10s -parallel=2
+          go test ./internal/roi -run '^$' -fuzz '^FuzzSubscriptionDocuments$' -fuzztime=10s -parallel=2
+          go test ./internal/roi -run '^$' -fuzz '^FuzzGitwebDocuments$' -fuzztime=10s -parallel=2
+      - name: Benchmark archive metadata
+        run: go test ./internal/roi -run '^$' -bench '^BenchmarkLargeArchiveMetadata$' -benchtime=1x -benchmem
+      - name: Build browser test executable
+        env:
+          ROI_VERSION: ${{ needs.lint.outputs.version }}
+          ROI_COMMIT: ${{ github.sha }}
+        run: sh scripts/build.sh bin/roi
+      - name: Install browser test tools
+        run: |
+          npm install --prefix "$RUNNER_TEMP/roi-browser" --no-package-lock --no-audit --no-fund playwright@1.64.1
+          "$RUNNER_TEMP/roi-browser/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Browser integration
+        env:
+          PLAYWRIGHT_MODULE: ${{ runner.temp }}/roi-browser/node_modules/playwright
+          ROI_SCREENSHOT_DIR: ${{ github.workspace }}/.coverage/ui
+        run: node tests/browser.cjs
+      - name: Upload test diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: roi-test-results
+          overwrite: true
+          include-hidden-files: true
+          if-no-files-found: ignore
+          path: |
+            .coverage/coverage.out
+            .coverage/ui/
+
+  build:
+    name: Build and smoke-test
+    needs: [lint, tests]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      image_artifact: ${{ steps.image.outputs.artifact-id }}
+      release_artifact: ${{ steps.release.outputs.artifact-id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - name: Build Linux amd64 executable and inventory
+        env:
+          GOOS: linux
+          GOARCH: amd64
+          CGO_ENABLED: '0'
+          ROI_VERSION: ${{ needs.lint.outputs.version }}
+          ROI_COMMIT: ${{ github.sha }}
+        run: |
+          sh scripts/build.sh dist/roi-linux-amd64
+          python3 scripts/artifacts.py dist/roi-linux-amd64
+          cp examples/config.yaml examples/roi.container LICENSE dist/
+      - name: Build Linux amd64 image
+        env:
+          ROI_IMAGE: ${{ needs.lint.outputs.image }}
+          ROI_VERSION: ${{ needs.lint.outputs.version }}
+        run: |
+          docker build --platform linux/amd64 --build-arg ROI_VERSION="$ROI_VERSION" --build-arg ROI_COMMIT="$GITHUB_SHA" --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" --label "org.opencontainers.image.version=$ROI_VERSION" --label "org.opencontainers.image.revision=$GITHUB_SHA" -t "$ROI_IMAGE" .
+      - name: Smoke-test image
+        env:
+          ROI_IMAGE: ${{ needs.lint.outputs.image }}
+        run: sh scripts/container-smoke.sh "$ROI_IMAGE"
+      - name: Save tested image for publication
+        env:
+          ROI_IMAGE: ${{ needs.lint.outputs.image }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/roi-image"
+          docker save --output "$RUNNER_TEMP/roi-image/image.tar" "$ROI_IMAGE"
+          cd "$RUNNER_TEMP/roi-image"
+          sha256sum image.tar > image.tar.sha256
+      - name: Upload tested image
+        id: image
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: roi-image
+          overwrite: true
+          retention-days: 30
+          if-no-files-found: error
+          path: ${{ runner.temp }}/roi-image/
+      - name: Upload release files
+        id: release
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: roi-linux-amd64
+          overwrite: true
+          retention-days: 30
+          if-no-files-found: error
+          path: dist/
+
+  publish:
+    name: Publish image
+    if: ${{ github.event_name == 'push' }}
+    needs: [lint, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    env:
+      ROI_IMAGE: ${{ needs.lint.outputs.image }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.build.outputs.image_artifact }}
+          path: ${{ runner.temp }}/roi-image
+          merge-multiple: true
+      - name: Load and verify tested image
+        run: |
+          cd "$RUNNER_TEMP/roi-image"
+          sha256sum --check image.tar.sha256
+          docker load --input image.tar
+          revision=$(docker image inspect "$ROI_IMAGE" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')
+          test "$revision" = "$GITHUB_SHA"
+      - name: Publish image tags
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PRERELEASE: ${{ needs.lint.outputs.prerelease }}
+          DOCKER_CONFIG: ${{ runner.temp }}/roi-docker-auth
+        run: |
+          mkdir -p "$DOCKER_CONFIG"
+          chmod 700 "$DOCKER_CONFIG"
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker --debug push "$ROI_IMAGE"
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$PRERELEASE" = false ]; then
+            stable="ghcr.io/${GITHUB_REPOSITORY,,}:stable"
+            docker tag "$ROI_IMAGE" "$stable"
+            docker --debug push "$stable"
+          fi
+      - name: Remove registry credentials
+        if: ${{ always() }}
+        run: rm -rf "$RUNNER_TEMP/roi-docker-auth"
+
+  release:
+    name: Publish GitHub Release
+    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') }}
+    needs: [lint, build, publish]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.build.outputs.release_artifact }}
+          path: dist
+          merge-multiple: true
+      - name: Verify executable checksum
+        run: |
+          cd dist
+          sha256sum --check roi-linux-amd64.sha256
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          PRERELEASE: ${{ needs.lint.outputs.prerelease }}
+        run: |
+          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            flags=(--draft)
+            if [ "$PRERELEASE" = true ]; then flags+=(--prerelease); fi
+            gh release create "$RELEASE_TAG" --verify-tag --title "roi $RELEASE_TAG" --generate-notes "${flags[@]}"
+          fi
+          gh release upload "$RELEASE_TAG" --clobber dist/roi-linux-amd64 dist/roi-linux-amd64.sha256 dist/roi-linux-amd64.cdx.json dist/config.yaml dist/roi.container dist/LICENSE
+          flags=(--draft=false --latest)
+          if [ "$PRERELEASE" = true ]; then flags=(--draft=false --prerelease --latest=false); fi
+          gh release edit "$RELEASE_TAG" "${flags[@]}"
