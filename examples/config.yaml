@@ -1,0 +1,69 @@
+# roi — ροή. Working configuration for local tests.
+debug: false # Enable admin/API request logs, including device names.
+api:
+  listen: 127.0.0.1:8080
+  prefix: /greader
+admin:
+  listen: 127.0.0.1:8081
+ops:
+  listen: 127.0.0.1:8082
+
+database: ./data/roi.db
+
+backup:
+  enabled: false # Set true for daily online SQLite backups.
+  directory: ./data/backups/automatic
+  time: "03:00" # UTC, once per day; catches up on startup after this time.
+  keep: 7 # Keep the newest 7 daily copies; 0 uses the default of 7.
+
+admin_auth:
+  username: admin
+  # Test password: roi-admin-test
+  password_hash: '$argon2id$v=19$m=65536,t=3,p=4$ApbSZlY3HshPpZCIguAZpg$95i7UhUqIN0iw9K4hizaB/WGbaqbw35fDzZiiBdy4b8'
+api_auth:
+  username: reader
+  # Test password: roi-reader-test
+  password_hash: '$argon2id$v=19$m=65536,t=3,p=4$BIBSXen++v1kYGjJNboBVQ$OV0spOSu2gPp5JLV5fmIkS1rzLre0bu7EEhPBhXR6VY'
+
+poll:
+  interval: 10m
+  timeout: 30s
+  workers: 4
+  per_host_concurrency: 1 # Shared by RSS and Git sources; github.com includes api.github.com.
+  per_host_delay: 2s # Minimum pause after a sync before another source on that host starts.
+  max_bytes: 33554432 # 32 MiB, after decompression; shared across one Git sync.
+  allow_private_networks: false # Legacy broad override; metadata/link-local addresses remain blocked.
+  allowed_networks: [] # Prefer exact internal IPs/CIDRs, e.g. [10.20.0.15] for a private Git server.
+
+retention:
+  months: 0 # 0 disables the age limit; calendar months since first receipt
+  entries_per_feed: 0 # 0 disables the count limit
+  keep_starred: true
+
+secure_cookies: false # true when the admin is accessed through HTTPS
+
+security:
+  file_permissions: warn # Use strict in production; private config/DB files 0600, data directory 0700.
+  parse_concurrency: 2 # Shared by feed fetches, Git discovery and subscription imports.
+  parse_memory_bytes: 134217728 # Admission budget, at least 16 MiB and twice poll.max_bytes.
+  real_ip_header: "" # Empty: legacy XFF/X-Real-IP. Example: CF-Connecting-IP or X-Real-IP.
+  # Forwarded client addresses are ignored unless the immediate peer is trusted.
+  # Accepts individual IPv4/IPv6 addresses and CIDR networks in the same list.
+  # With an empty real_ip_header, XFF takes precedence over X-Real-IP.
+  trusted_proxies: [] # e.g. ['127.0.0.1', '::1', '10.20.0.0/24']
+  # For a local nginx proxy:
+  # trusted_proxies:
+  #   - 127.0.0.1
+  #   - '::1'
+  max_response_bytes: 67108864 # 64 MiB per article response, including JSON escaping
+  login_per_minute: 10
+  account_login_per_minute: 60
+  api_requests_per_minute: 6000
+  api_burst: 200
+  api_concurrency: 4
+
+# Optional Git API tokens, scoped to the repository host (never shown in the admin).
+# Public repositories work without tokens, subject to the service's rate limits.
+git:
+  tokens:
+    github.com: "" # Optional GitHub token; keep real credentials in a local config.

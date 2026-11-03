@@ -1,0 +1,27 @@
+/bin/
+/data/
+/config.yaml
+/examples/*.local.yaml
+*.local.yaml
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+/worker.js
+/config.json
+*.db
+*.db-shm
+*.db-wal
+*.roi.lock
+*.test
+coverage.out
+.DS_Store
+
+# Local subscription exports may contain personal information.
+/*.opml
+/*.roi
+
+/.coverage/
+/node_modules/
+
+/dist/
+__pycache__/

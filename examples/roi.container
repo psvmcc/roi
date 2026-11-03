@@ -1,0 +1,25 @@
+[Unit]
+Description=roi RSS and Git release reader
+
+[Container]
+ContainerName=roi
+Image=ghcr.io/psvmcc/roi:stable
+Pull=newer
+AutoUpdate=registry
+Volume=/etc/roi:/config:ro,Z
+Volume=/var/lib/roi:/data:U,Z
+ReadOnly=true
+NoNewPrivileges=true
+DropCapability=all
+Tmpfs=/tmp:rw,noexec,nosuid,nodev,size=300m,mode=1777
+PidsLimit=128
+
+[Service]
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=900
+TimeoutStopSec=45
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target

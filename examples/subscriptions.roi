@@ -1,0 +1,30 @@
+# ROI subscriptions. Import this file in the admin's ROI section.
+# Source settings only; no credentials, articles or read/starred state.
+format: roi
+version: 1
+sources:
+  - type: rss
+    url: https://go.dev/blog/feed.atom
+    site_url: https://go.dev/blog/
+    title: Go Blog
+    user_agent: "" # Empty uses roi/1.0; set a custom value for this RSS feed.
+    folders: [Development/Go]
+    enabled: true
+    paused: false
+  - type: git
+    repository: https://github.com/nginx/nginx
+    service: github
+    title: 'github.com :: nginx/nginx'
+    mode: releases # releases or tags
+    include_preview: false
+    enabled: true
+    paused: false
+  - type: git
+    repository: 'https://git.haproxy.org/?p=haproxy-3.4.git;a=summary'
+    service: gitweb
+    title: 'git.haproxy.org :: haproxy-3.4'
+    mode: tags
+    tag_filter: 'v3.4.*'
+    include_preview: false
+    enabled: true
+    paused: false
