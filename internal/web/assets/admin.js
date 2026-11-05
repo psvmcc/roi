@@ -11,12 +11,10 @@
     }
   }
   localizeTimes();
-  const fragments = ['summary', 'feed-list', 'git-feed-list', 'recent-syncs', 'reader-sessions', 'browser-sessions', 'security-events', 'storage-footer'];
-  const filter = document.querySelector('#disabled-only');
-  if (!filter) return;
   let requestNumber = 0;
   let refreshController;
   let pending = 0;
+  let navigating = false;
   let noticeTimer;
 
   function notify(message, error = false) {
@@ -32,16 +30,14 @@
     window.location.assign('/login');
     return true;
   }
-  async function refresh(background = false) {
+  async function refresh(background = false, target = null) {
+    if (background && navigating) return;
     const number = ++requestNumber;
+    if (target) navigating = true;
     if (refreshController) refreshController.abort();
     refreshController = new AbortController();
-    const url = new URL('/', window.location.origin);
-    for (const key of ['reader_page', 'browser_page']) {
-      const value = new URL(window.location.href).searchParams.get(key);
-      if (value) url.searchParams.set(key, value);
-    }
-    if (filter.checked) url.searchParams.set('disabled', '1');
+    const url = new URL(target || window.location.href);
+    url.hash = '';
     url.searchParams.set('fragment', '1');
     try {
       const response = await fetch(url, { headers: { 'X-ROI-Request': 'async' }, signal: refreshController.signal });
@@ -50,22 +46,49 @@
       const parsed = new DOMParser().parseFromString(await response.text(), 'text/html');
       localizeTimes(parsed);
       if (number !== requestNumber) return;
-      // Validate the entire fragment response before updating any section.
-      if (fragments.some(id => !parsed.getElementById(id))) throw new Error('The dashboard response was incomplete.');
-      const positions = ['feed-scroll', 'git-feed-scroll', 'sync-scroll', 'reader-session-scroll', 'browser-session-scroll', 'security-scroll'].map(id => {
-        const node = document.getElementById(id);
-        return { id, left: node.scrollLeft, top: node.scrollTop };
-      });
-      const top = window.scrollY;
-      for (const id of fragments) document.getElementById(id).replaceWith(document.importNode(parsed.getElementById(id), true));
-      for (const position of positions) {
-        const node = document.getElementById(position.id);
-        node.scrollLeft = position.left;
-        node.scrollTop = position.top;
+      const content = parsed.getElementById('page-content');
+      if (!content || !content.dataset.page) throw new Error('The dashboard response was incomplete.');
+      // Import/export forms are static; keep any selected files during polling.
+      if (!target && content.dataset.page === 'import-export' && document.body.dataset.page === 'import-export') return;
+      // Refresh Maintenance statistics while preserving expanded backup sections.
+      if (!target && content.dataset.page === 'maintenance' && document.body.dataset.page === 'maintenance') {
+        const ids = ['storage-footer'];
+        for (const id of ['backup-statistics', 'subscription-backups']) if (document.getElementById(id)) ids.push(id);
+        if (ids.some(id => !content.querySelector('#' + id))) throw new Error('The dashboard response was incomplete.');
+        const details = [...document.querySelectorAll('#backup-statistics details, #subscription-backups details')].map(node => ({ id: node.id, open: node.open }));
+        for (const id of ids) document.getElementById(id).replaceWith(document.importNode(content.querySelector('#' + id), true));
+        for (const state of details) { const node = document.getElementById(state.id); if (node) node.open = state.open; }
+        return;
       }
-      window.scrollTo(0, top);
+      const details = [...document.querySelectorAll('#page-content details')].map(node => ({ id: node.id, open: node.open }));
+      const positions = [...document.querySelectorAll('#page-content .scroll[id]')].map(node => ({ id: node.id, left: node.scrollLeft, top: node.scrollTop }));
+      const top = window.scrollY;
+      document.getElementById('page-content').replaceWith(document.importNode(content, true));
+      document.body.dataset.page = content.dataset.page;
+      for (const link of document.querySelectorAll('.top-nav a')) {
+        if (link.pathname === '/' + content.dataset.page) link.setAttribute('aria-current', 'page');
+        else link.removeAttribute('aria-current');
+      }
+      if (target) history.pushState(null, '', target);
+      if (!target) {
+        for (const state of details) {
+          const node = document.getElementById(state.id);
+          if (node) node.open = state.open;
+        }
+        for (const position of positions) {
+          const node = document.getElementById(position.id);
+          if (node) { node.scrollLeft = position.left; node.scrollTop = position.top; }
+        }
+      }
+      window.scrollTo(0, target ? 0 : top);
+      if (target) {
+        const heading = document.querySelector('#page-content h2');
+        if (heading) { heading.tabIndex = -1; heading.focus({ preventScroll: true }); }
+      }
     } catch (error) {
       if (error.name !== 'AbortError' && !background) notify(error.message || 'Unable to refresh the dashboard.', true);
+    } finally {
+      if (number === requestNumber) navigating = false;
     }
   }
   function legacyCopy(value) {
@@ -330,19 +353,21 @@
     dialog.showModal();
     if (edit) { const input = dialog.querySelector('input[name=title]'); input.focus(); input.select(); }
   });
-  filter.addEventListener('change', () => {
+  document.addEventListener('change', event => {
+    if (!event.target.matches('#disabled-only')) return;
     const url = new URL(window.location.href);
-    if (filter.checked) url.searchParams.set('disabled', '1'); else url.searchParams.delete('disabled');
+    if (event.target.checked) url.searchParams.set('disabled', '1'); else url.searchParams.delete('disabled');
     history.replaceState(null, '', url);
     refresh();
   });
   document.addEventListener('click', event => {
-    const link = event.target.closest('[data-session-page]');
-    if (!link) return;
+    const link = event.target.closest('[data-nav], [data-session-page]');
+    if (!link || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     event.preventDefault();
-    history.replaceState(null, '', link.href);
-    refresh();
+    if (pending) return;
+    refresh(false, link.href);
   });
+  window.addEventListener('popstate', () => refresh());
   document.addEventListener('visibilitychange', () => { if (!document.hidden && !pending) refresh(true); });
   setInterval(() => { if (!document.hidden && !pending) refresh(true); }, 5000);
 })();

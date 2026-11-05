@@ -80,6 +80,9 @@ func (a *App) runBackups(ctx context.Context) {
 				next = backupTime(now.AddDate(0, 0, 1), b.Time)
 			}
 		}
+		a.backupMu.Lock()
+		a.backupState.Next = next.Unix()
+		a.backupMu.Unlock()
 		timer := time.NewTimer(time.Until(next))
 		select {
 		case <-ctx.Done():
@@ -89,7 +92,7 @@ func (a *App) runBackups(ctx context.Context) {
 		}
 	}
 }
-func (a *App) dailyBackup(ctx context.Context, now time.Time) (bool, error) {
+func (a *App) createDailyBackup(ctx context.Context, now time.Time) (bool, error) {
 	b := a.config.backupConfig()
 	directory, err := filepath.Abs(b.Directory)
 	if err != nil {

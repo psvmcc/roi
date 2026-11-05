@@ -70,5 +70,5 @@ func (a *App) adminAPIDevice(w http.ResponseWriter, r *http.Request) {
 		_ = jsonReply(w, map[string]any{"ok": true, "message": "API device updated."})
 		return
 	}
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	http.Redirect(w, r, "/devices", http.StatusSeeOther)
 }

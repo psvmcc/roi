@@ -32,7 +32,23 @@ type feedPanel struct {
 	DisabledFeeds             int64
 }
 
+type starredArticle struct {
+	Title, URL, Feed string
+	Published        int64
+	Active           bool
+}
+
+type starredPanel struct {
+	Articles             []starredArticle
+	Total, Page          int
+	PreviousURL, NextURL string
+}
+
 type dashboard struct {
+	SubscriptionBackups                                          subscriptionBackupPanel
+	Backups                                                      backupPanel
+	Page                                                         string
+	Starred                                                      starredPanel
 	APIDevices                                                   []APIDevice
 	CSRF                                                         string
 	Feeds                                                        []Feed
@@ -50,118 +66,158 @@ type dashboard struct {
 func (a *App) adminDashboard(w http.ResponseWriter, r *http.Request, cookie *http.Cookie, csrf string) {
 	var e error
 	var err error
-	d := dashboard{CSRF: csrf, DisabledOnly: r.URL.Query().Get("disabled") == "1"}
-	d.APIDevices, err = a.store.APIDevices(r.Context())
-	if err != nil {
-		a.requestError(w, r, err)
-		return
+	d := dashboard{CSRF: csrf, Page: strings.TrimPrefix(r.URL.Path, "/"), DisabledOnly: r.URL.Query().Get("disabled") == "1"}
+	if d.Page == "" {
+		d.Page = "feeds"
+	}
+	if d.Page == "devices" {
+		d.APIDevices, err = a.store.APIDevices(r.Context())
+		if err != nil {
+			a.requestError(w, r, err)
+			return
+		}
+	}
+	if d.Page == "starred" {
+		if err := a.starredPanel(r, &d.Starred); err != nil {
+			a.requestError(w, r, err)
+			return
+		}
+	}
+	if d.Page == "feeds" {
+		if err := a.store.DB.QueryRowContext(r.Context(), "SELECT COUNT(*) FROM entries WHERE starred=1").Scan(&d.Starred.Total); err != nil {
+			a.requestError(w, r, err)
+			return
+		}
 	}
 	d.RSSPanel = feedPanel{CSRF: csrf, ID: "feed-list", ScrollID: "feed-scroll", Label: "RSS Feeds", DisabledOnly: d.DisabledOnly}
 	d.GitPanel = feedPanel{CSRF: csrf, ID: "git-feed-list", ScrollID: "git-feed-scroll", Label: "GIT Releases Feeds", DisabledOnly: d.DisabledOnly, IsGit: true}
 	d.ReaderSessions = sessionPanel{CSRF: csrf, ScrollID: "reader-session-scroll", Label: "Reader API sessions"}
 	d.BrowserSessions = sessionPanel{CSRF: csrf, ScrollID: "browser-session-scroll", Label: "Browser sessions", ShowExpiry: true}
-	if err := a.sessionPanels(r, sessionID(cookie.Value), &d.ReaderSessions, &d.BrowserSessions); err != nil {
-		a.requestError(w, r, err)
-		return
-	}
-	d.SecurityEvents, err = a.securityHistory()
-	if err != nil {
-		a.requestError(w, r, err)
-		return
-	}
-	allFeeds, err := a.store.Feeds()
-	e = err
-	if e != nil {
-		a.requestError(w, r, e)
-		return
-	}
-	for _, f := range allFeeds {
-		if u, err := url.Parse(f.URL); err == nil && f.Active && !f.Paused {
-			ready, busy := a.poller.hostStatus(hostGroup(u))
-			f.HostQueued = busy && f.Next <= time.Now().Unix()
-			if f.HostQueued || ready.After(time.Unix(f.Next, 0)) {
-				f.HostReason, f.HostResume = a.poller.hostWaitReason(hostGroup(u))
-			}
-			if ready.After(time.Now()) {
-				f.Next = max(f.Next, (ready.UnixMilli()+999)/1000)
-			}
+	if d.Page == "devices" || d.Page == "security" {
+		if err := a.sessionPanels(r, sessionID(cookie.Value), &d.ReaderSessions, &d.BrowserSessions); err != nil {
+			a.requestError(w, r, err)
+			return
 		}
-		d.DataBytes += f.Bytes
-		d.Entries += f.Count
-		d.StoredUnread += f.Unread
-		if f.Active {
-			d.EnabledFeeds++
-			d.Unread += f.VisibleUnread
-			f.Unread = f.VisibleUnread
-		} else {
-			d.DisabledFeeds++
-			if f.GitProvider == "" {
-				d.RSSPanel.DisabledFeeds++
+	}
+	if d.Page == "security" {
+		d.SecurityEvents, err = a.securityHistory()
+		if err != nil {
+			a.requestError(w, r, err)
+			return
+		}
+	}
+	if d.Page == "feeds" {
+		allFeeds, err := a.store.Feeds()
+		e = err
+		if e != nil {
+			a.requestError(w, r, e)
+			return
+		}
+		for _, f := range allFeeds {
+			if u, err := url.Parse(f.URL); err == nil && f.Active && !f.Paused {
+				ready, busy := a.poller.hostStatus(hostGroup(u))
+				f.HostQueued = busy && f.Next <= time.Now().Unix()
+				if f.HostQueued || ready.After(time.Unix(f.Next, 0)) {
+					f.HostReason, f.HostResume = a.poller.hostWaitReason(hostGroup(u))
+				}
+				if ready.After(time.Now()) {
+					f.Next = max(f.Next, (ready.UnixMilli()+999)/1000)
+				}
+			}
+			d.Entries += f.Count
+			d.StoredUnread += f.Unread
+			if f.Active {
+				d.EnabledFeeds++
+				d.Unread += f.VisibleUnread
+				f.Unread = f.VisibleUnread
 			} else {
-				d.GitPanel.DisabledFeeds++
+				d.DisabledFeeds++
+				if f.GitProvider == "" {
+					d.RSSPanel.DisabledFeeds++
+				} else {
+					d.GitPanel.DisabledFeeds++
+				}
+				d.DisabledUnread += f.Unread
 			}
-			d.DisabledUnread += f.Unread
+			if f.Active != d.DisabledOnly {
+				d.Feeds = append(d.Feeds, f)
+			}
 		}
-		if f.Active != d.DisabledOnly {
-			d.Feeds = append(d.Feeds, f)
+		sort.SliceStable(d.Feeds, func(i, j int) bool {
+			x, y := d.Feeds[i], d.Feeds[j]
+			if x.Paused != y.Paused {
+				return x.Paused
+			}
+			xe, ye := x.Error != "" || x.Failures > 0, y.Error != "" || y.Failures > 0
+			if xe != ye {
+				return xe
+			}
+			if x.Failures != y.Failures {
+				return x.Failures > y.Failures
+			}
+			return strings.ToLower(x.Title) < strings.ToLower(y.Title)
+		})
+		for _, f := range d.Feeds {
+			if f.GitProvider == "" {
+				d.RSSPanel.Feeds = append(d.RSSPanel.Feeds, f)
+			} else {
+				d.GitPanel.Feeds = append(d.GitPanel.Feeds, f)
+			}
 		}
 	}
-	sort.SliceStable(d.Feeds, func(i, j int) bool {
-		x, y := d.Feeds[i], d.Feeds[j]
-		if x.Paused != y.Paused {
-			return x.Paused
+	if d.Page == "maintenance" {
+		if st, e := os.Stat(a.config.Database); e == nil {
+			d.DBBytes = st.Size()
 		}
-		xe, ye := x.Error != "" || x.Failures > 0, y.Error != "" || y.Failures > 0
-		if xe != ye {
-			return xe
-		}
-		if x.Failures != y.Failures {
-			return x.Failures > y.Failures
-		}
-		return strings.ToLower(x.Title) < strings.ToLower(y.Title)
-	})
-	for _, f := range d.Feeds {
-		if f.GitProvider == "" {
-			d.RSSPanel.Feeds = append(d.RSSPanel.Feeds, f)
-		} else {
-			d.GitPanel.Feeds = append(d.GitPanel.Feeds, f)
+		if st, e := os.Stat(a.config.Database + "-wal"); e == nil {
+			d.WALBytes = st.Size()
 		}
 	}
-	if st, e := os.Stat(a.config.Database); e == nil {
-		d.DBBytes = st.Size()
-	}
-	if st, e := os.Stat(a.config.Database + "-wal"); e == nil {
-		d.WALBytes = st.Size()
-	}
-	rows, e := a.store.DB.Query("SELECT f.title,x.started,x.finished,x.status,x.added,x.error FROM fetches x JOIN feeds f ON f.id=x.feed_id ORDER BY x.id DESC LIMIT 50")
-	if e != nil {
-		a.requestError(w, r, e)
-		return
-	}
-	for rows.Next() {
-		var l fetchLog
-		if e = rows.Scan(&l.Feed, &l.Started, &l.Finished, &l.Status, &l.Added, &l.Error); e != nil {
-			break
+	if d.Page == "feeds" {
+		rows, e := a.store.DB.Query("SELECT f.title,x.started,x.finished,x.status,x.added,x.error FROM fetches x JOIN feeds f ON f.id=x.feed_id ORDER BY x.id DESC LIMIT 50")
+		if e != nil {
+			a.requestError(w, r, e)
+			return
 		}
-		d.Logs = append(d.Logs, l)
+		for rows.Next() {
+			var l fetchLog
+			if e = rows.Scan(&l.Feed, &l.Started, &l.Finished, &l.Status, &l.Added, &l.Error); e != nil {
+				break
+			}
+			d.Logs = append(d.Logs, l)
+		}
+		if e == nil {
+			e = rows.Err()
+		}
+		rows.Close()
+		if e != nil {
+			a.requestError(w, r, e)
+			return
+		}
 	}
-	if e == nil {
-		e = rows.Err()
-	}
-	rows.Close()
-	if e != nil {
-		a.requestError(w, r, e)
-		return
-	}
-	e = a.store.DB.QueryRow("SELECT last_run,deleted FROM maintenance WHERE id=1").Scan(&d.LastRotation, &d.Deleted)
-	if e != nil && e != sql.ErrNoRows {
-		a.requestError(w, r, e)
-		return
-	}
-	d.SpaceUsage, err = a.store.Space(r.Context())
-	if err != nil {
-		a.requestError(w, r, err)
-		return
+	if d.Page == "maintenance" {
+		if err := a.subscriptionBackupStatistics(r, &d.SubscriptionBackups); err != nil {
+			a.requestError(w, r, err)
+			return
+		}
+		if err := a.backupStatistics(r, &d.Backups); err != nil {
+			a.requestError(w, r, err)
+			return
+		}
+		if err := a.store.DB.QueryRowContext(r.Context(), "SELECT COALESCE(SUM(bytes),0) FROM feed_stats").Scan(&d.DataBytes); err != nil {
+			a.requestError(w, r, err)
+			return
+		}
+		e = a.store.DB.QueryRow("SELECT last_run,deleted FROM maintenance WHERE id=1").Scan(&d.LastRotation, &d.Deleted)
+		if e != nil && e != sql.ErrNoRows {
+			a.requestError(w, r, e)
+			return
+		}
+		d.SpaceUsage, err = a.store.Space(r.Context())
+		if err != nil {
+			a.requestError(w, r, err)
+			return
+		}
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	name := "admin.html"

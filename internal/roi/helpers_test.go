@@ -77,6 +77,16 @@ func rollbackReviewMigration(t *testing.T, db *sql.DB) {
 	if version < 11 {
 		return
 	}
+	if version >= 15 {
+		if _, err := db.Exec("DROP TABLE subscription_backup_state"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if version >= 14 {
+		if _, err := db.Exec("DROP TABLE backup_days"); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if version >= 13 {
 		if _, err := db.Exec("DROP INDEX auth_sessions_device; ALTER TABLE auth_sessions DROP COLUMN device_id; DROP TABLE api_devices"); err != nil {
 			t.Fatal(err)

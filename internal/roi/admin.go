@@ -118,7 +118,7 @@ func (a *App) admin(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	if r.URL.Path != "/" {
+	if r.URL.Path != "/" && r.URL.Path != "/feeds" && r.URL.Path != "/starred" && r.URL.Path != "/devices" && r.URL.Path != "/security" && r.URL.Path != "/maintenance" && r.URL.Path != "/import-export" {
 		http.NotFound(w, r)
 		return
 	}

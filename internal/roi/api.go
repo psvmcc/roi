@@ -573,7 +573,7 @@ func (a *App) editTag(w http.ResponseWriter, r *http.Request) error {
 				default:
 					return clientError("unsupported tag")
 				}
-				if _, e = tx.Exec("UPDATE entries SET "+col+"=? WHERE id IN (SELECT e.id FROM entries e JOIN feeds f ON f.id=e.feed_id WHERE e.id=? AND "+readerEntryFilter+")", value, id); e != nil {
+				if _, e = tx.Exec("UPDATE entries SET "+col+"=?,updated=MAX(updated,?) WHERE id IN (SELECT e.id FROM entries e JOIN feeds f ON f.id=e.feed_id WHERE e.id=? AND "+readerEntryFilter+") AND "+col+"<>?", value, time.Now().Unix(), id, value); e != nil {
 					return e
 				}
 			}

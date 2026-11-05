@@ -1,0 +1,18 @@
+{{define "subscription-backups"}}{{if .Enabled}}<section id="subscription-backups" aria-labelledby="subscription-backups-heading">
+<h2 id="subscription-backups-heading">Subscription backups</h2>
+<div class="scroll"><table class="storage-table" aria-label="Subscription backup statistics"><tbody>
+<tr><th scope="row">Schedule</th><td>Daily at {{.Time}} UTC, only if the ROI export changed · keep {{.Keep}} copies</td></tr>
+<tr><th scope="row">Directory</th><td>{{.Directory}}</td></tr>
+<tr><th scope="row">Next check</th><td>{{if .Running}}Running since {{when .Started}}{{else}}{{when .Next}}{{end}}</td></tr>
+<tr><th scope="row">Last check</th><td>{{when .LastChecked}}{{if .Result}} · {{.Result}}{{end}}</td></tr>
+<tr><th scope="row">Last copy created</th><td>{{when .LastCreated}}</td></tr>
+<tr><th scope="row">Stored now</th><td>{{.StoredCount}} copies · {{size .StoredBytes}}</td></tr>
+<tr><th scope="row">Copies created (recorded total)</th><td>{{.Created}} copies · {{size .Bytes}}</td></tr>
+{{if .Error}}<tr><th scope="row">Last error</th><td class="error">{{.Error}}</td></tr>{{end}}
+{{if .ScanError}}<tr><th scope="row">Directory error</th><td class="error">{{.ScanError}}</td></tr>{{end}}
+</tbody></table></div>
+<p class="muted">The first copy is created immediately. Later checks run once per UTC day and create a file only when exported subscription settings change. At most one copy is created per day, including restarts; later edits wait for the next daily check. Articles, read/starred state and credentials are excluded. Retention keeps copies, not days.</p>
+<details id="subscription-backup-files"><summary>Stored ROI copies · {{.StoredCount}}</summary><div class="scroll"><table aria-label="Stored subscription backups"><thead><tr><th>File / UTC day</th><th>Size</th><th>Modified</th></tr></thead><tbody>
+{{range .Files}}<tr><td>{{.Name}}</td><td>{{size .Bytes}}</td><td class="time">{{when .Modified}}</td></tr>{{else}}<tr><td colspan="3" class="empty">No subscription backups found.</td></tr>{{end}}
+</tbody></table></div><p class="muted">The latest 50 copies are listed; totals include all stored ROI copies. Restore subscriptions using Import/Export.</p></details>
+</section>{{end}}{{end}}

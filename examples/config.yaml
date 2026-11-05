@@ -12,10 +12,16 @@ ops:
 database: ./data/roi.db
 
 backup:
-  enabled: false # Set true for daily online SQLite backups.
+  enabled: true # Set true for daily online SQLite backups.
   directory: ./data/backups/automatic
   time: "03:00" # UTC, once per day; catches up on startup after this time.
   keep: 7 # Keep the newest 7 daily copies; 0 uses the default of 7.
+
+subscription_backup:
+  enabled: true # Daily ROI snapshots, only when subscription export changes.
+  directory: ./data/backups/subscriptions
+  time: "02:00" # UTC. The first copy is immediate; at most one new copy per UTC day.
+  keep: 30 # Keep the newest 30 copies, not 30 days; 0 uses the default of 30.
 
 admin_auth:
   username: admin

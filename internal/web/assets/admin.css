@@ -34,14 +34,15 @@ button:disabled { opacity: .55; cursor: wait; }
 .secondary { background: var(--surface); color: var(--text); border-color: var(--border); }
 .danger { background: var(--error); color: var(--bg); }
 :focus-visible { outline: 3px solid var(--link); outline-offset: 3px; }
+#page-content h2[tabindex="-1"]:focus { outline: none; }
 input { font: inherit; color: var(--text); }
 input:not([type=checkbox]):not([type=file]):not([type=hidden]) { width: 100%; min-height: 36px; padding: 8px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 7px; }
 .app-header, .header-actions, .section-heading, .feed-controls, .opml-actions, .opml-actions form, .dialog-actions { display: flex; align-items: center; gap: 12px; }
 .app-header { justify-content: space-between; flex-wrap: wrap; margin-bottom: 28px; }
 .header-actions { flex-wrap: wrap; max-width: 100%; }
-.cards { display: grid; grid-template-columns: repeat(6,minmax(0,1fr)); gap: 12px; margin: 0 0 32px; }
+.cards { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 12px; margin: 0 0 32px; }
 .card { background: var(--surface); border: 1px solid var(--border); padding: 18px; border-radius: 10px; }
-.card > span { color: var(--muted); font-size: 12px; }
+.card > span, .card > a > span { color: var(--muted); font-size: 12px; }
 .card strong { display: block; margin: 8px 0 5px; font-size: clamp(19px,2vw,28px); font-weight: 650; letter-spacing: -.6px; }
 .card small { font-size: 11px; }
 .section-heading { justify-content: space-between; flex-wrap: wrap; margin: 0 0 14px; }
@@ -104,7 +105,7 @@ dialog label input { display: block; margin-top: 8px; }
 .confirm-delete { max-width: 680px; margin: 8vh auto; }
 .confirm-delete header { display: flex; align-items: center; justify-content: space-between; }
 .confirm-delete .actions { display: flex; align-items: center; gap: 16px; margin-top: 24px; }
-@media (max-width: 1050px) { .cards { grid-template-columns: repeat(3,minmax(0,1fr)); } }
+@media (max-width: 1050px) { .cards { grid-template-columns: repeat(2,minmax(0,1fr)); } }
 @media (max-width: 600px) { body { padding: 18px 14px; } .cards { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; } .card { padding: 14px; } .section-heading { gap: 14px; } .feed-controls { gap: 14px; } .opml-actions form { width: 100%; gap: 12px; } input[type=file] { max-width: 100%; } }
 @media (prefers-reduced-motion: reduce) { .switch-track::before { transition: none; } }
 
@@ -172,3 +173,21 @@ button.icon-button.inline-edit, button.icon-button.inline-copy { width: calc(1em
 .credential-field { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
 .credential-field input { flex: 1; min-width: 0; }
 .credential-field .icon-button { flex: 0 0 36px; }
+
+#starred-scroll td { overflow-wrap: anywhere; }
+
+.top-nav { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: -8px 0 28px; border-bottom: 1px solid var(--border); }
+.top-nav a { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 12px 2px 10px; border-bottom: 2px solid transparent; text-decoration: none; color: var(--muted); font-weight: 600; }
+.top-nav a:hover, .top-nav a[aria-current=page] { color: var(--text); }
+.top-nav a[aria-current=page] { border-bottom-color: var(--accent); }
+.card > a { display: block; color: inherit; text-decoration: none; }
+#sync-details > summary { cursor: pointer; padding: 12px 0; font-weight: 600; }
+.top-nav svg { width: 20px; height: 20px; flex: 0 0 20px; stroke: currentColor; stroke-width: 1.7; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+@media (max-width: 600px) { .top-nav { flex-wrap: nowrap; gap: 4px; margin-bottom: 22px; } .top-nav a { flex: 1; justify-content: center; min-width: 44px; padding: 12px 8px 10px; } .top-nav a span { display: none; } }
+
+.storage-table th { width: 30%; min-width: 120px; }
+.storage-table td { overflow-wrap: anywhere; }
+#page-content > h2 { margin-bottom: 14px; }
+
+#backup-statistics summary, #subscription-backups summary { cursor: pointer; font-weight: 600; padding: 12px 0; }
+#backup-statistics td, #subscription-backups td { overflow-wrap: anywhere; }

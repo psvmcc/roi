@@ -60,7 +60,7 @@ func TestSessionIPHistoryIndividualRevocationAndRedaction(t *testing.T) {
 	if len(history) == 0 || history[0].Path != "/revoke-session" || history[0].Realm != "admin" {
 		t.Fatal(history)
 	}
-	page := adminRequest(a, cookie, "GET", "/?session="+sessionID(first), nil)
+	page := adminRequest(a, cookie, "GET", "/security?session="+sessionID(first), nil)
 	if page.Code != 200 || !strings.Contains(page.Body.String(), "Session revoked") || strings.Contains(page.Body.String(), first) {
 		t.Fatal("session UI missing metadata or leaked token")
 	}
@@ -188,7 +188,7 @@ func TestSessionFailureResponsesAndAtomicRotation(t *testing.T) {
 	if _, err := a.sessionList(""); err == nil {
 		t.Fatal("corrupted session accepted")
 	}
-	w = adminRequest(a, cookie, "GET", "/", nil)
+	w = adminRequest(a, cookie, "GET", "/devices", nil)
 	if w.Code != 500 {
 		t.Fatal(w.Code)
 	}
@@ -197,7 +197,7 @@ func TestSessionFailureResponsesAndAtomicRotation(t *testing.T) {
 	if _, err := a.securityHistory(); err == nil {
 		t.Fatal("corrupted event accepted")
 	}
-	w = adminRequest(a, cookie, "GET", "/", nil)
+	w = adminRequest(a, cookie, "GET", "/security", nil)
 	if w.Code != 500 {
 		t.Fatal(w.Code)
 	}
@@ -239,19 +239,19 @@ func TestSessionPanelsOnlyShowActiveSessions(t *testing.T) {
 		t.Fatal(err)
 	}
 	mustExec(t, a, "UPDATE auth_sessions SET expires=? WHERE id=?", time.Now().Add(-time.Second).Unix(), sessionID(expired))
-	for _, path := range []string{"/", "/?fragment=1"} {
-		w := adminRequest(a, cookie, "GET", path, nil)
+	for _, suffix := range []string{"", "?fragment=1"} {
+		w := adminRequest(a, cookie, "GET", "/devices"+suffix, nil)
 		if w.Code != 200 {
 			t.Fatal(w.Code, w.Body.String())
 		}
 		body := w.Body.String()
 		readerStart := strings.Index(body, `<section id="reader-sessions">`)
-		browserStart := strings.Index(body, `<section id="browser-sessions">`)
-		if readerStart < 0 || browserStart < readerStart {
-			t.Fatal("session blocks missing or out of order")
+		if readerStart < 0 {
+			t.Fatal("Reader sessions missing")
 		}
-		reader := body[readerStart:browserStart]
-		browser := strings.Split(body[browserStart:], "</section>")[0]
+		reader := strings.Split(body[readerStart:], "</section>")[0]
+		browserPage := adminRequest(a, cookie, "GET", "/security"+suffix, nil).Body.String()
+		browser := strings.Split(strings.Split(browserPage, `<section id="browser-sessions">`)[1], "</section>")[0]
 		if !strings.Contains(reader, sessionID(active)) || strings.Contains(reader, sessionID(cookie.Value)) || !strings.Contains(reader, `action="/revoke-session"`) || !strings.Contains(reader, `action="/revoke-api-tokens"`) {
 			t.Fatal("Reader session or revoke actions in wrong block")
 		}
@@ -267,7 +267,7 @@ func TestSessionPanelsOnlyShowActiveSessions(t *testing.T) {
 	if err := a.revokeSession(sessionID(active)); err != nil {
 		t.Fatal(err)
 	}
-	w := adminRequest(a, cookie, "GET", "/", nil)
+	w := adminRequest(a, cookie, "GET", "/devices", nil)
 	reader := strings.Split(strings.Split(w.Body.String(), `<section id="reader-sessions">`)[1], "</section>")[0]
 	if !strings.Contains(reader, "No active sessions.") {
 		t.Fatal("missing empty state")

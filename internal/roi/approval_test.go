@@ -93,7 +93,7 @@ func TestPendingReaderCannotReadOrMutateBeforeApproval(t *testing.T) {
 	if w := asyncAdmin(a, cookie, "POST", "/rename-device", values); w.Code != 200 {
 		t.Fatal(w.Code, w.Body.String())
 	}
-	page := adminRequest(a, cookie, "GET", "/", nil)
+	page := adminRequest(a, cookie, "GET", "/devices", nil)
 	if !strings.Contains(page.Body.String(), "Reeder desktop") {
 		t.Fatal("device name missing")
 	}

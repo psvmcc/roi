@@ -55,7 +55,7 @@ func TestDeviceFeedVisibilityIsolationPersistenceAndState(t *testing.T) {
 	if w = apiReq(a, hiddenToken, "GET", "/reader/api/0/user-info", nil); w.Code != 200 {
 		t.Fatal(w.Code)
 	}
-	body := adminRequest(a, cookie, "GET", "/", nil).Body.String()
+	body := adminRequest(a, cookie, "GET", "/devices", nil).Body.String()
 	if !strings.Contains(body, `aria-label="Show feeds"`) || !strings.Contains(body, "Feeds hidden") {
 		t.Fatal("hidden state missing in admin")
 	}

@@ -1,0 +1,27 @@
+{{define "backup-statistics"}}{{if .Enabled}}
+<section id="backup-statistics" aria-labelledby="backups-heading">
+<h2 id="backups-heading">Backups</h2>
+<div class="scroll"><table class="storage-table" aria-label="Backup statistics"><tbody>
+<tr><th scope="row">Schedule</th><td>Daily at {{.Time}} UTC · keep {{.Keep}} copies</td></tr>
+<tr><th scope="row">Directory</th><td>{{.Directory}}</td></tr>
+<tr><th scope="row">Next run</th><td>{{if .Running}}Running since {{when .Started}}{{else}}{{when .Next}}{{end}}</td></tr>
+<tr><th scope="row">Last run</th><td>{{when .LastAttempt}}</td></tr>
+<tr><th scope="row">Last successful check</th><td>{{when .LastSuccess}}</td></tr>
+<tr><th scope="row">Stored now</th><td>{{.StoredCount}} copies · {{size .StoredBytes}}</td></tr>
+<tr><th scope="row">Copies created (recorded total)</th><td>{{.Created}} copies · {{size .CreatedBytes}}</td></tr>
+<tr><th scope="row">Task runs / errors</th><td>{{.Attempts}} / {{.Errors}}</td></tr>
+{{if .LastError}}<tr><th scope="row">Last run error</th><td class="error">{{.LastError}}</td></tr>{{end}}
+{{if .ScanError}}<tr><th scope="row">Directory error</th><td class="error">{{.ScanError}}</td></tr>{{end}}
+</tbody></table></div>
+<p class="muted">A restart checks today's existing backup; it does not create or overwrite it. <strong>Task runs</strong> counts creation attempts and checks of existing copies, including retries. <strong>Copies created</strong> counts newly created files only.</p>
+<p class="muted">Daily totals use UTC. Timestamps use your browser timezone. Created bytes include copies already removed by retention; stored bytes count current automatic backup files only. Accounting starts with this version; earlier files are included in stored totals.</p>
+<details id="backup-files"><summary>Stored copies · {{.StoredCount}}</summary>
+<div class="scroll"><table aria-label="Stored backups"><thead><tr><th>File / UTC day</th><th>Size</th><th>Modified</th></tr></thead><tbody>
+{{range .Files}}<tr><td>{{.Name}}</td><td>{{size .Bytes}}</td><td class="time">{{when .Modified}}</td></tr>{{else}}<tr><td colspan="3" class="empty">No automatic backups found.</td></tr>{{end}}
+</tbody></table></div><p class="muted">The latest 50 stored copies are listed. Totals include all stored copies.</p></details>
+<details id="backup-history" open><summary>Daily backup history</summary>
+<div class="scroll"><table aria-label="Daily backup history"><thead><tr><th>Day (UTC)</th><th>Copies created</th><th>Data created</th><th>Task runs / errors</th><th>Last run</th><th>Last run duration</th><th>Last error</th></tr></thead><tbody>
+{{range .Days}}<tr><td>{{.Day}}</td><td>{{.Created}}</td><td>{{size .Bytes}}</td><td>{{.Attempts}} / {{.Errors}}</td><td class="time">{{when .LastAttempt}}</td><td>{{.DurationMS}} ms</td><td class="error">{{.LastError}}</td></tr>{{else}}<tr><td colspan="7" class="empty">No recorded backup runs yet.</td></tr>{{end}}
+</tbody></table></div>
+<nav class="session-pages" aria-label="Backup history pages">{{if .PreviousURL}}<a href="{{.PreviousURL}}" data-session-page>Previous</a> · {{end}}Page {{.Page}} of {{.Pages}}{{if .NextURL}} · <a href="{{.NextURL}}" data-session-page>Next</a>{{end}}</nav>
+</details></section>{{end}}{{end}}

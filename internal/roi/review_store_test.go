@@ -141,7 +141,7 @@ func TestSessionPaginationAndPendingBound(t *testing.T) {
 	}
 	cookie, _ := adminSession(t, a)
 	for _, page := range []string{"1", "2", "3", "-100", "999999999999999999999"} {
-		body := adminRequest(a, cookie, "GET", "/?reader_page="+page, nil).Body.String()
+		body := adminRequest(a, cookie, "GET", "/devices?reader_page="+page, nil).Body.String()
 		if !strings.Contains(body, "226 active sessions") || !strings.Contains(body, "data-session-page") {
 			t.Fatal("pagination missing", page)
 		}

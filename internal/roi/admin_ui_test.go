@@ -61,7 +61,7 @@ func TestAdminFilteredFragmentsUnreadFoldersAndErrorPriority(t *testing.T) {
 	if w.Code != 200 || strings.Contains(body, "<!doctype") || strings.Contains(body, "<script") {
 		t.Fatal("fragment returned full page")
 	}
-	for _, id := range []string{"summary", "feed-list", "recent-syncs", "security-events", "storage-footer"} {
+	for _, id := range []string{"summary", "feed-list", "recent-syncs", "page-content"} {
 		if !strings.Contains(body, `id="`+id+`"`) {
 			t.Fatal("missing fragment", id)
 		}

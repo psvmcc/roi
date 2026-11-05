@@ -52,6 +52,8 @@ async function freePorts() {
       .replace(':8080', `:${apiPort}`).replace(':8081', `:${adminPort}`).replace(':8082', `:${opsPort}`)
       .replace(/^([ \t]*)public_url:.*$/m, '$1public_url: https://reader.example.org').replace('./data/roi.db', path.join(dir, 'roi.db')).replace(/interval: \S+/, 'interval: 1s')
       .replace('login_per_minute: 10', 'login_per_minute: 1000').replace('account_login_per_minute: 60', 'account_login_per_minute: 1000')
+      .replace('enabled: false # Set true for daily online SQLite backups.', 'enabled: true # Set true for daily online SQLite backups.').replace('./data/backups/automatic', path.join(dir, 'backups')).replace('time: "03:00"', 'time: "00:00"')
+      .replace('enabled: false # Daily ROI snapshots, only when subscription export changes.', 'enabled: true # Daily ROI snapshots, only when subscription export changes.').replace('./data/backups/subscriptions', path.join(dir, 'subscription-backups'))
       .replace('allow_private_networks: false', 'allow_private_networks: true').replace('per_host_delay: 2s', 'per_host_delay: 0s');
     fs.writeFileSync(path.join(dir, 'config.yaml'), config);
     app = spawn(process.env.ROI_BINARY || path.join(root, 'bin', 'roi'), [], {
@@ -108,6 +110,36 @@ async function freePorts() {
     await page.evaluate(() => { window.__roiDocumentMarker = 'preserved'; });
     let documentRequests = 0;
     page.on('request', request => { if (request.isNavigationRequest() && request.frame() === page.mainFrame()) documentRequests++; });
+    assert.equal(await page.locator('#summary .card').count(), 4);
+    assert.deepEqual(await page.locator('#summary .card span').allTextContents(), ['Subscriptions', 'Entries', 'Unread', 'Starred']);
+    const menuLinks = page.locator('.top-nav a');
+    assert.equal(await menuLinks.count(), 6);
+    for (const link of await menuLinks.all()) {
+      assert.equal(await link.locator('svg').count(), 1);
+      assert.equal(await link.locator('span').isVisible(), true);
+      assert.equal(await link.getAttribute('aria-label'), await link.locator('span').innerText());
+    }
+    async function navigate(section) {
+      if (await page.locator('body').getAttribute('data-page') === section) return;
+      await page.locator('.top-nav').getByRole('link', { name: section === 'import-export' ? 'Import/Export' : section[0].toUpperCase() + section.slice(1), exact: true }).click();
+      await page.waitForFunction(value => document.body.dataset.page === value && document.querySelector('.top-nav [aria-current=page]')?.getAttribute('href') === '/' + value, section);
+    }
+    await navigate('devices');
+    await navigate('security');
+    await page.evaluate(() => history.back());
+    await page.waitForFunction(() => document.body.dataset.page === 'devices' && location.pathname === '/devices');
+    await page.evaluate(() => history.forward());
+    await page.waitForFunction(() => document.body.dataset.page === 'security' && location.pathname === '/security');
+    await navigate('feeds');
+    const plainContext = await browser.newContext({ javaScriptEnabled: false });
+    await plainContext.addCookies(await context.cookies());
+    const plainPage = await plainContext.newPage();
+    for (const section of ['feeds', 'starred', 'devices', 'security', 'import-export', 'maintenance']) {
+      await plainPage.goto(admin + '/' + section);
+      assert.equal(await plainPage.locator('.top-nav [aria-current=page]').getAttribute('href'), '/' + section);
+      assert.equal(await plainPage.locator('#page-content').getAttribute('data-page'), section);
+    }
+    await plainContext.close();
     async function action(button, route) {
       if (['/import', '/import-roi'].includes(route) && !(await button.evaluate(node => !!node.closest('#import-preview-dialog')))) {
         const [previewResponse] = await Promise.all([
@@ -169,12 +201,36 @@ async function freePorts() {
     await noStorage.close();
     const opml = `<opml><body><outline text="Local"><outline text="Local test feed" xmlUrl="${feedURL}"/></outline></body></opml>`;
     async function importOPML() {
+      await navigate('import-export');
       await page.locator('input[name=opml]').setInputFiles({ name: 'test.opml', mimeType: 'text/xml', buffer: Buffer.from(opml) });
       await action(page.getByRole('button', { name: 'Import OPML' }), '/import');
+      await navigate('feeds');
     }
     // Preview/cancel must leave the subscription list unchanged.
     assert.ok((await page.locator('.build-version').innerText()).length > 0);
+    await navigate('maintenance');
+    assert.equal(await page.locator('.opml-panel').count(), 0);
+    assert.equal(await page.locator('#summary').count(), 0);
+    const storageTable = page.getByRole('table', { name: 'Storage statistics', exact: true });
+    assert.equal(await page.locator('#backup-statistics').count(), 1);
+    assert.equal(await page.locator('#subscription-backups').count(), 1);
+    assert.ok((await page.getByRole('table', { name: 'Subscription backup statistics', exact: true }).innerText()).includes('keep 30 copies'));
+    await page.locator('#subscription-backup-files summary').click();
+    assert.equal(await page.getByRole('table', { name: 'Stored subscription backups', exact: true }).locator('tbody tr').count(), 1);
+    await page.getByRole('table', { name: 'Daily backup history', exact: true }).getByRole('cell', { name: /^[1-9]\d* \/ 0$/ }).waitFor();
+    await page.locator('#backup-files summary').click();
+    assert.equal(await page.getByRole('table', { name: 'Stored backups', exact: true }).locator('tbody tr').count(), 1);
+    for (const label of ['Entry data', 'SQLite', 'WAL']) assert.equal(await storageTable.getByRole('rowheader', { name: label, exact: true }).count(), 1);
+    await navigate('import-export');
     await page.locator('input[name=opml]').setInputFiles({ name: 'test.opml', mimeType: 'text/xml', buffer: Buffer.from(opml) });
+    await page.locator('.opml-panel').evaluate(node => node.dataset.uploadMarker = 'preserved');
+    await page.waitForResponse(response => {
+      const url = new URL(response.url());
+      return url.pathname === '/import-export' && url.searchParams.get('fragment') === '1';
+    });
+    await sleep(100);
+    assert.equal(await page.locator('.opml-panel').getAttribute('data-upload-marker'), 'preserved');
+    assert.equal(await page.locator('input[name=opml]').evaluate(node => node.files.length), 1);
     await Promise.all([
       page.waitForResponse(r => new URL(r.url()).pathname === '/preview-import'),
       page.getByRole('button', { name: 'Import OPML', exact: true }).click(),
@@ -183,7 +239,9 @@ async function freePorts() {
     await importDialog.waitFor({ state: 'visible' });
     assert.ok((await page.locator('#import-summary').innerText()).includes('1 to add'));
     await importDialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await navigate('feeds');
     assert.equal(await page.getByRole('table', { name: 'RSS Feeds', exact: true }).locator('[data-feed-id]').count(), 0);
+    await navigate('import-export');
     // Invalid individual records are visible and cannot be confirmed.
     await page.getByLabel('ROI file', { exact: true }).setInputFiles({ name: 'invalid.roi', mimeType: 'application/yaml', buffer: Buffer.from('format: roi\nversion: 1\nsources:\n - type: rss\n   url: file:///invalid\n') });
     await Promise.all([
@@ -241,9 +299,8 @@ async function freePorts() {
     });
 
     assert.equal(await page.getByText('Subscriptions and sync', { exact: true }).count(), 0);
-    const placement = await page.evaluate(() => ({ feeds: document.querySelector('#feeds-heading').getBoundingClientRect().top, opml: document.querySelector('.opml-panel').getBoundingClientRect().top, sameBar: document.querySelector('.section-heading').contains(document.querySelector('form[action="/sync"]')) }));
-    assert.ok(placement.opml > placement.feeds);
-    assert.equal(placement.sameBar, true);
+    assert.equal(await page.locator('.opml-panel').count(), 0);
+    assert.equal(await page.locator('.section-heading').first().evaluate(node => node.contains(document.querySelector('form[action="/sync"]'))), true);
     assert.equal(await feedTable.getByRole('row').count(), 2);
     assert.equal(await feedTable.getByRole('columnheader', { name: 'Consecutive errors', exact: true }).count(), 1);
     assert.equal(await feedTable.locator('td.failures').innerText(), '0');
@@ -251,6 +308,7 @@ async function freePorts() {
     assert.equal(await feedTable.getByRole('row').count(), 2);
     async function createPersonalCredentials(name, useUI = false) {
       if (useUI) {
+        await navigate('devices');
         await page.getByRole('button', { name: 'Add API device', exact: true }).click();
         const dialog = page.locator('#api-device-dialog');
         await dialog.getByLabel('Device name', { exact: true }).fill(name);
@@ -344,6 +402,7 @@ async function freePorts() {
     assert.equal((await approvedRow.innerText()).includes('Never expires'), false);
     assert.equal(await page.locator('#reader-sessions').getByRole('columnheader', { name: 'Created', exact: true }).count(), 1);
     assert.equal(await page.locator('#reader-sessions').getByRole('columnheader', { name: 'Created / expires', exact: true }).count(), 0);
+    await navigate('feeds');
     const publicationTime = page.locator('time[data-unix="1255536760"]').first();
     await publicationTime.waitFor({ timeout: 10000 });
     assert.equal(await publicationTime.getAttribute('data-time-zone'), 'Asia/Tokyo');
@@ -376,6 +435,17 @@ async function freePorts() {
     assert.equal(article.timestampUsec, String(published * 1000000));
     assert.equal(refs.itemRefs[0].timestampUsec, article.timestampUsec);
     assert.ok(Number(article.crawlTimeMsec) > Date.parse('2020-01-01T00:00:00Z'));
+    const actionToken = (await (await context.request.get(api + '/reader/api/0/token', { headers })).text()).trim();
+    for (const op of ['a', 'r']) {
+      const change = await context.request.post(api + '/reader/api/0/edit-tag', { headers, form: { i: item, [op]: 'user/-/state/com.google/starred', T: actionToken } });
+      assert.equal(change.status(), 200);
+      await page.waitForFunction(expected => [...document.querySelectorAll('#summary .card')].find(n => n.querySelector('span')?.textContent === 'Starred')?.querySelector('strong').textContent === expected, op === 'a' ? '1' : '0');
+      await navigate('starred');
+      const starredSection = page.locator('#starred-articles');
+      if (op === 'a') await starredSection.getByRole('link', { name: 'Local article', exact: true }).waitFor();
+      else assert.ok((await starredSection.innerText()).includes('No starred articles.'));
+      await navigate('feeds');
+    }
     await feedTable.getByRole('button', { name: 'Edit name', exact: true }).click();
     await page.getByRole('textbox', { name: 'Subscription name', exact: true }).fill('My local feed');
     await action(page.getByRole('button', { name: 'Save name', exact: true }), '/rename');
@@ -409,8 +479,10 @@ async function freePorts() {
     assert.equal((await get('subscription/list')).subscriptions.length, 0);
 
     const extra = `<opml><body><outline text="Engineering"><outline text="A healthy" xmlUrl="${feedURL}"/><outline text="Z broken" xmlUrl="${feedURL.replace('/feed', '/broken')}"/></outline></body></opml>`;
+    await navigate('import-export');
     await page.locator('input[name=opml]').setInputFiles({ name: 'extra.opml', mimeType: 'text/xml', buffer: Buffer.from(extra) });
     await action(page.getByRole('button', { name: 'Import OPML' }), '/import');
+    await navigate('feeds');
     await page.waitForFunction(() => document.querySelector('#feed-list tr[data-feed-id]')?.dataset.title === 'Z broken');
     assert.ok(await feedTable.locator('tr[data-feed-id]').first().getAttribute('class').then(c => c.includes('has-error')));
     const healthyRow = feedTable.getByRole('row').filter({ hasText: 'A healthy' });
@@ -466,6 +538,7 @@ async function freePorts() {
     assert.equal(await feedTable.locator('[data-git-edit]').count(), 0);
     assert.equal(await gitTable.locator('[data-git-edit]').count(), 1);
     assert.equal(await page.locator('section[aria-labelledby=git-feeds-heading] [data-git-add]').count(), 1);
+    await navigate('import-export');
     const [roiDownload] = await Promise.all([
       page.waitForEvent('download'),
       page.getByRole('link', { name: 'Export ROI', exact: true }).click(),
@@ -482,8 +555,10 @@ async function freePorts() {
     assert.ok(roiText.includes(feedURL));
     assert.ok(roiText.includes('type: rss'));
     async function importROI(text) {
+      await navigate('import-export');
       await page.getByLabel('ROI file', { exact: true }).setInputFiles({ name: 'sources.roi', mimeType: 'application/yaml', buffer: Buffer.from(text) });
       await action(page.getByRole('button', { name: 'Import ROI', exact: true }), '/import-roi');
+      await navigate('feeds');
     }
     await importROI(roiText);
     assert.equal(await gitTable.locator('[data-git-edit]').count(), 1);
@@ -583,7 +658,7 @@ async function freePorts() {
     const sessionRow = page.locator(`[data-session-id="${secondID}"]`);
     await sessionRow.waitFor({ timeout: 10000 });
     assert.equal(await page.locator(`#reader-sessions [data-session-id="${secondID}"]`).count(), 1);
-    assert.equal(await page.locator("#browser-sessions [data-session-id]").count(), 1);
+    assert.equal(await page.locator("#browser-sessions [data-session-id]").count(), 0);
     assert.ok((await sessionRow.innerText()).includes('127.0.0.1'));
     await sessionRow.getByRole('button', { name: 'Revoke session', exact: true }).click();
     await page.locator('#revoke-dialog').getByRole('button', { name: 'Cancel', exact: true }).click();
@@ -598,6 +673,8 @@ async function freePorts() {
     assert.equal(failedAdmin.status(), 403);
     const failedAPI = await context.request.post(api + '/accounts/ClientLogin', { form: { Email: 'reader', Passwd: 'incorrect-test-secret' } });
     assert.equal(failedAPI.status(), 403);
+    await navigate('security');
+    assert.equal(await page.locator('#browser-sessions [data-session-id]').count(), 1);
     await page.waitForFunction(() => {
       const rows = [...document.querySelectorAll('#security-scroll tbody tr')].map(row => row.textContent);
       return ['admin', 'api'].every(service => rows.some(text => text.includes('Login failed') && text.includes(service) && text.includes('127.0.0.1')));
@@ -612,6 +689,13 @@ async function freePorts() {
     assert.equal(await page.locator('.app-header h1').innerText(), 'ροή');
     async function assertMobileLayout(width) {
       await page.setViewportSize({ width, height: 844 });
+      for (const link of await page.locator('.top-nav a').all()) {
+        assert.equal(await link.locator('span').isVisible(), false);
+        assert.equal(await link.locator('svg').isVisible(), true);
+        assert.ok((await link.getAttribute('aria-label')).length > 0);
+        const bounds = await link.boundingBox();
+        assert.ok(bounds.width >= 44 && bounds.height >= 44);
+      }
       const layout = await page.evaluate(() => {
         const viewport = document.documentElement.clientWidth;
         const overflowing = [...document.querySelectorAll('body *')].filter(element => {
@@ -629,11 +713,16 @@ async function freePorts() {
       }
       assert.ok(layout.pageWidth <= layout.viewport, 'Horizontal page overflow: ' + JSON.stringify(layout));
     }
-    for (const width of [390, 320]) await assertMobileLayout(width);
+    for (const section of ['feeds', 'starred', 'devices', 'security', 'import-export', 'maintenance']) {
+      await navigate(section);
+      for (const width of [390, 320]) await assertMobileLayout(width);
+    }
+
     const originalVersion = await page.locator('.build-version').innerText();
     await page.locator('.build-version').evaluate(element => element.textContent = 'v1.2.3-release-candidate.123 (123456789abc)');
     for (const width of [390, 320]) await assertMobileLayout(width);
     await page.locator('.build-version').evaluate((element, text) => element.textContent = text, originalVersion);
+    await navigate('devices');
     // A full pending queue cannot hide an approved device permanently.
     for (let i = 0; i < 100; i++) {
       const pending = await personalLogin('Pending Reader ' + i);
@@ -654,6 +743,7 @@ async function freePorts() {
     assert.equal(relogin.status(), 200);
     assert.equal(documentRequests, 0, 'dashboard actions reloaded the document');
     assert.equal(await page.evaluate(() => window.__roiDocumentMarker), 'preserved');
+    await navigate('security');
     await page.locator('#browser-sessions').getByRole('button', { name: 'Revoke session', exact: true }).click();
     assert.equal(await page.locator('#revoke-dialog h2').innerText(), 'Revoke browser session?');
     assert.equal((await page.locator('#revoke-description').innerText()).includes('API'), false);

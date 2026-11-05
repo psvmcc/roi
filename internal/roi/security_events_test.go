@@ -67,7 +67,7 @@ func TestSecurityEventsFailedLoginsAndOrdinaryRequestLogs(t *testing.T) {
 		t.Fatal("ordinary request missing from server log")
 	}
 	cookie, _ := adminSession(t, a)
-	page := adminRequest(a, cookie, "GET", "/", nil)
+	page := adminRequest(a, cookie, "GET", "/security", nil)
 	if page.Code != 200 || !strings.Contains(page.Body.String(), "Login failed") || strings.Contains(page.Body.String(), "Recent Reader API requests") || strings.Contains(page.Body.String(), "Session history and admin events") || strings.Contains(page.Body.String(), "data-session-history") {
 		t.Fatal("obsolete panels or missing security events")
 	}

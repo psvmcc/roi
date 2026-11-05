@@ -25,8 +25,9 @@ type Endpoint struct {
 	PublicURL string `yaml:"public_url,omitempty"`
 }
 type Config struct {
-	Backup BackupConfig `yaml:"backup"`
-	Git    struct {
+	Backup             BackupConfig `yaml:"backup"`
+	SubscriptionBackup BackupConfig `yaml:"subscription_backup"`
+	Git                struct {
 		Tokens map[string]string `yaml:"tokens"`
 	} `yaml:"git"`
 	Debug     bool        `yaml:"debug"`
@@ -145,6 +146,9 @@ func LoadConfig(path string) (Config, error) {
 func (c Config) Validate() error {
 	if err := c.backupConfig().validate(); err != nil {
 		return err
+	}
+	if err := c.subscriptionBackupConfig().validate(); err != nil {
+		return errors.New(strings.Replace(err.Error(), "backup.", "subscription_backup.", 1))
 	}
 	seen := map[string]bool{}
 	for _, e := range []Endpoint{c.API, c.Admin, c.Ops} {

@@ -16,20 +16,24 @@ import (
 )
 
 type App struct {
-	instanceLock *os.File
-	closeOnce    sync.Once
-	closeError   error
-	config       Config
-	store        *Store
-	poller       *Poller
-	metrics      *metrics.Set
-	mu           sync.Mutex
-	keyRotation  sync.Mutex
-	signingKey   string
-	legacyKey    string
-	limiter      *requestLimiter
-	apiSlots     chan struct{}
-	auditGate    auditGate
+	instanceLock      *os.File
+	closeOnce         sync.Once
+	closeError        error
+	config            Config
+	store             *Store
+	poller            *Poller
+	metrics           *metrics.Set
+	mu                sync.Mutex
+	keyRotation       sync.Mutex
+	signingKey        string
+	legacyKey         string
+	limiter           *requestLimiter
+	apiSlots          chan struct{}
+	backupMu          sync.Mutex
+	backupState       backupRuntime
+	subscriptionState backupRuntime
+	subscriptionRunMu sync.Mutex
+	auditGate         auditGate
 }
 
 func New(c Config) (*App, error) {
@@ -230,6 +234,7 @@ func (a *App) Run(ctx context.Context) error {
 	var wg sync.WaitGroup
 	wg.Go(func() { a.poller.Run(runCtx) })
 	wg.Go(func() { a.runBackups(runCtx) })
+	wg.Go(func() { a.runSubscriptionBackups(runCtx) })
 	servers := []*http.Server{}
 	errs := make(chan error, 3)
 	for i, h := range handlers {

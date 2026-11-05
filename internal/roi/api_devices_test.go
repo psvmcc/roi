@@ -59,7 +59,7 @@ func TestPersonalAPIDeviceEnrollmentApprovalLifecycleAndAudit(t *testing.T) {
 	if err = a.store.DB.QueryRow("SELECT code_hash FROM api_devices WHERE id=?", id).Scan(&hash); err != nil || !strings.HasPrefix(hash, "$argon2id$") || hash == c.Code || !VerifyPassword(hash, []byte(c.Code)) {
 		t.Fatal("code not stored as an Argon2id hash", err)
 	}
-	page := adminRequest(a, cookie, "GET", "/", nil).Body.String()
+	page := adminRequest(a, cookie, "GET", "/devices", nil).Body.String()
 	if strings.Contains(page, c.Code) || strings.Contains(page, hash) || !strings.Contains(page, c.Login) {
 		t.Fatal("secret exposed in dashboard")
 	}

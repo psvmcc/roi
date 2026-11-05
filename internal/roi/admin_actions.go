@@ -297,5 +297,12 @@ func (a *App) adminAction(w http.ResponseWriter, r *http.Request, cookie *http.C
 		_ = jsonReply(w, map[string]any{"ok": true, "message": adminActionMessage(r.URL.Path)})
 		return
 	}
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	page := "/feeds"
+	switch r.URL.Path {
+	case "/import", "/import-roi":
+		page = "/import-export"
+	case "/approve-session", "/rename-device", "/device-feeds", "/revoke-api-tokens", "/revoke-session":
+		page = "/devices"
+	}
+	http.Redirect(w, r, page, http.StatusSeeOther)
 }

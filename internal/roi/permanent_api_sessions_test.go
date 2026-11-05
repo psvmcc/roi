@@ -123,7 +123,8 @@ func TestPermanentSessionUIAndBrowserExpiryIsolation(t *testing.T) {
 	a := testApp(t)
 	token := approvedToken(t, a)
 	cookie, _ := adminSession(t, a)
-	body := adminRequest(a, cookie, "GET", "/", nil).Body.String()
+	body := adminRequest(a, cookie, "GET", "/devices", nil).Body.String()
+	body += adminRequest(a, cookie, "GET", "/security", nil).Body.String()
 	if strings.Contains(body, "Type / status") || strings.Contains(body, "Never expires") || !strings.Contains(body, `data-session-realm="admin"`) || !strings.Contains(body, `data-session-realm="api"`) {
 		t.Fatal("session UI missing expiry/realm information")
 	}
