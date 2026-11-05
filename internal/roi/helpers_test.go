@@ -77,6 +77,11 @@ func rollbackReviewMigration(t *testing.T, db *sql.DB) {
 	if version < 11 {
 		return
 	}
+	if version >= 13 {
+		if _, err := db.Exec("DROP INDEX auth_sessions_device; ALTER TABLE auth_sessions DROP COLUMN device_id; DROP TABLE api_devices"); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if version >= 12 {
 		if _, err := db.Exec("ALTER TABLE auth_sessions DROP COLUMN feeds_hidden"); err != nil {
 			t.Fatal(err)
@@ -138,4 +143,13 @@ func approvedToken(t *testing.T, a *App) string {
 		}
 	}
 	return token
+}
+
+func deviceLoginForm(t *testing.T, a *App) url.Values {
+	t.Helper()
+	c, err := a.store.CreateAPIDevice(t.Context(), "Test device")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return url.Values{"Email": {c.Login}, "Passwd": {c.Code}}
 }

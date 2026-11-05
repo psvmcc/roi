@@ -11,8 +11,8 @@ func migrate(db *sql.DB) error {
 	if err = db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		return err
 	}
-	if version > 12 {
-		return fmt.Errorf("database schema %d is newer than supported schema 12", version)
+	if version > 13 {
+		return fmt.Errorf("database schema %d is newer than supported schema 13", version)
 	}
 	if version == 0 {
 		tx, e := db.Begin()
@@ -197,6 +197,25 @@ PRAGMA user_version=8;`); e != nil {
 		}
 		defer tx.Rollback()
 		if _, e = tx.Exec("ALTER TABLE auth_sessions ADD COLUMN feeds_hidden INTEGER NOT NULL DEFAULT 0; PRAGMA user_version=12;"); e != nil {
+			return e
+		}
+		if e = tx.Commit(); e != nil {
+			return e
+		}
+	}
+	if version < 13 {
+		tx, e := db.Begin()
+		if e != nil {
+			return e
+		}
+		defer tx.Rollback()
+		if _, e = tx.Exec(`CREATE TABLE api_devices (
+id INTEGER PRIMARY KEY AUTOINCREMENT, login TEXT NOT NULL UNIQUE,
+name TEXT NOT NULL, code_hash TEXT NOT NULL DEFAULT '',
+code_expires INTEGER NOT NULL DEFAULT 0, created INTEGER NOT NULL);
+ALTER TABLE auth_sessions ADD COLUMN device_id INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX auth_sessions_device ON auth_sessions(device_id);
+PRAGMA user_version=13;`); e != nil {
 			return e
 		}
 		if e = tx.Commit(); e != nil {

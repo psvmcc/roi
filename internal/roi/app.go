@@ -26,6 +26,7 @@ type App struct {
 	mu           sync.Mutex
 	keyRotation  sync.Mutex
 	signingKey   string
+	legacyKey    string
 	limiter      *requestLimiter
 	apiSlots     chan struct{}
 	auditGate    auditGate
@@ -67,6 +68,10 @@ func New(c Config) (*App, error) {
 		m.GetOrCreateCounter(name)
 	}
 	a.signingKey = key
+	if e = s.DB.QueryRow("SELECT COALESCE((SELECT value FROM auth_secrets WHERE name='api_legacy_key'),'')").Scan(&a.legacyKey); e != nil {
+		s.DB.Close()
+		return nil, e
+	}
 	a.limiter = newRequestLimiter(c.security())
 	a.apiSlots = make(chan struct{}, c.security().APIConcurrency)
 	a.poller = NewPoller(s, c, m)
@@ -103,6 +108,7 @@ func (a *App) RotateAPIKey() error {
 	}
 	a.mu.Lock()
 	a.signingKey = key
+	a.legacyKey = ""
 	a.mu.Unlock()
 	return nil
 }

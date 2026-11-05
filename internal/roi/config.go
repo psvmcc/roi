@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -19,8 +20,9 @@ type Credentials struct {
 	PasswordHash string `yaml:"password_hash"`
 }
 type Endpoint struct {
-	Listen string `yaml:"listen"`
-	Prefix string `yaml:"prefix,omitempty"`
+	Listen    string `yaml:"listen"`
+	Prefix    string `yaml:"prefix,omitempty"`
+	PublicURL string `yaml:"public_url,omitempty"`
 }
 type Config struct {
 	Backup BackupConfig `yaml:"backup"`
@@ -33,7 +35,7 @@ type Config struct {
 	Ops       Endpoint    `yaml:"ops"`
 	Database  string      `yaml:"database"`
 	AdminAuth Credentials `yaml:"admin_auth"`
-	APIAuth   Credentials `yaml:"api_auth"`
+	APIAuth   Credentials `yaml:"api_auth,omitempty"` // Migration only; never accepts new logins.
 	Poll      struct {
 		Interval           string   `yaml:"interval"`
 		PerHostConcurrency int      `yaml:"per_host_concurrency"`
@@ -157,6 +159,20 @@ func (c Config) Validate() error {
 	if c.Admin.Prefix != "" || c.Ops.Prefix != "" {
 		return errors.New("prefix is supported only for api")
 	}
+	if c.Admin.PublicURL != "" || c.Ops.PublicURL != "" {
+		return errors.New("public_url is supported only for api")
+	}
+	if c.API.PublicURL != "" {
+		u, err := url.Parse(c.API.PublicURL)
+		if err != nil || u.Scheme != "https" && u.Scheme != "http" || u.Hostname() == "" || u.User != nil || u.Opaque != "" || u.RawQuery != "" || u.ForceQuery || strings.Contains(c.API.PublicURL, "#") || u.Path != "" && u.Path != "/" || u.RawPath != "" {
+			return errors.New("api.public_url must be an absolute http(s) origin without credentials, path, query or fragment; api.prefix is appended automatically")
+		}
+		if port := u.Port(); port != "" {
+			if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
+				return errors.New("api.public_url has an invalid port")
+			}
+		}
+	}
 	p := c.API.Prefix
 	if p != "" {
 		u, err := url.Parse(p)
@@ -164,7 +180,11 @@ func (c Config) Validate() error {
 			return errors.New("api.prefix must be empty or an absolute path without trailing slash")
 		}
 	}
-	for _, a := range []Credentials{c.AdminAuth, c.APIAuth} {
+	credentials := []Credentials{c.AdminAuth}
+	if c.APIAuth.Username != "" || c.APIAuth.PasswordHash != "" {
+		credentials = append(credentials, c.APIAuth)
+	}
+	for _, a := range credentials {
 		if a.Username == "" {
 			return errors.New("username is required")
 		}
@@ -225,4 +245,10 @@ func (c Config) Validate() error {
 	return nil
 }
 func (c Config) interval() time.Duration { d, _ := time.ParseDuration(c.Poll.Interval); return d }
-func (c Config) timeout() time.Duration  { d, _ := time.ParseDuration(c.Poll.Timeout); return d }
+func (c Config) readerAPIURL() string {
+	if c.API.PublicURL == "" {
+		return ""
+	}
+	return strings.TrimSuffix(c.API.PublicURL, "/") + c.API.Prefix
+}
+func (c Config) timeout() time.Duration { d, _ := time.ParseDuration(c.Poll.Timeout); return d }

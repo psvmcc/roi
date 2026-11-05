@@ -37,7 +37,7 @@ func (a *App) apiKey() string {
 	a.mu.Lock()
 	key := a.signingKey
 	a.mu.Unlock()
-	return sign(key, "roi-api-v2\n"+a.config.APIAuth.Username+"\n"+a.config.APIAuth.PasswordHash)
+	return sign(key, "roi-api-device-v1")
 }
 func (a *App) issueToken() string {
 	a.keyRotation.Lock()
@@ -64,7 +64,15 @@ func (a *App) tokenSignatureValid(token string) bool {
 	// Registered legacy tokens retain their original signed timestamp, while the
 	// database determines session lifetime. Active legacy sessions are upgraded
 	// to no-expiry on startup; revoked/expired records are never revived.
-	return e == nil && exp >= 0 && hmac.Equal([]byte(sign(a.apiKey(), strings.Join(v[:3], "."))), []byte(v[3]))
+	if e != nil || exp < 0 {
+		return false
+	}
+	payload := strings.Join(v[:3], ".")
+	valid := hmac.Equal([]byte(sign(a.apiKey(), payload)), []byte(v[3]))
+	a.mu.Lock()
+	legacy := a.legacyKey
+	a.mu.Unlock()
+	return valid || legacy != "" && hmac.Equal([]byte(sign(legacy, payload)), []byte(v[3]))
 }
 func (a *App) validToken(token string) bool {
 	return a.tokenSignatureValid(token) && a.sessionActive(sessionID(token))
@@ -90,18 +98,13 @@ func (a *App) api(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "try later", http.StatusTooManyRequests)
 			return
 		}
-		valid, err := checkCredentialsContext(r.Context(), a.config.APIAuth, r.PostForm.Get("Email"), r.PostForm.Get("Passwd"))
+		token, err := a.loginAPIDevice(r.Context(), r.PostForm.Get("Email"), r.PostForm.Get("Passwd"), r)
 		if err != nil {
 			http.Error(w, "authentication unavailable", http.StatusServiceUnavailable)
 			return
 		}
-		if !valid {
-			http.Error(w, "Error=BadAuthentication", http.StatusForbidden)
-			return
-		}
-		token := a.issueToken()
 		if token == "" {
-			http.Error(w, "session storage unavailable", http.StatusServiceUnavailable)
+			http.Error(w, "Error=BadAuthentication", http.StatusForbidden)
 			return
 		}
 		a.touchSession(r, sessionID(token))
@@ -199,7 +202,11 @@ func (a *App) apiRoute(w http.ResponseWriter, r *http.Request, route, auth strin
 	case "preference/stream/list":
 		return jsonReply(w, map[string]any{"streamprefs": map[string]any{}})
 	case "user-info":
-		return jsonReply(w, map[string]any{"userId": userID, "userName": a.config.APIAuth.Username, "userProfileId": userID, "userEmail": a.config.APIAuth.Username})
+		name := "reader"
+		if err := a.store.DB.QueryRow("SELECT COALESCE((SELECT login FROM api_devices WHERE id=auth_sessions.device_id),'reader') FROM auth_sessions WHERE id=?", sessionID(auth)).Scan(&name); err != nil {
+			return err
+		}
+		return jsonReply(w, map[string]any{"userId": userID, "userName": name, "userProfileId": userID, "userEmail": name})
 	case "subscription/list":
 		fs, e := a.store.Feeds()
 		if e != nil {
@@ -764,7 +771,17 @@ func (a *App) actionToken(auth string) string { return sign(a.apiKey(), "csrf:"+
 func (a *App) validActionToken(token, auth string) bool {
 	// Reader clients authenticate every request with a bearer token, never an
 	// admin cookie. Reeder sends T=x; some clients omit T altogether.
-	return token == "" || token == "x" || hmac.Equal([]byte(token), []byte(a.actionToken(auth))) || hmac.Equal([]byte(token), []byte(sign(a.apiKey(), "csrf:"+auth)))
+	if token == "" || token == "x" || hmac.Equal([]byte(token), []byte(a.actionToken(auth))) || hmac.Equal([]byte(token), []byte(sign(a.apiKey(), "csrf:"+auth))) {
+		return true
+	}
+	a.mu.Lock()
+	legacy := a.legacyKey
+	a.mu.Unlock()
+	if legacy == "" {
+		return false
+	}
+	expected := sign(legacy, "csrf:"+auth)
+	return hmac.Equal([]byte(token), []byte(expected)) || hmac.Equal([]byte(token), []byte(expected[:57]))
 }
 
 // Pending clients get normal, empty Reader responses so they can finish account

@@ -50,7 +50,7 @@ async function freePorts() {
     const admin = `http://127.0.0.1:${adminPort}`;
     const config = fs.readFileSync(path.join(root, 'examples/config.yaml'), 'utf8')
       .replace(':8080', `:${apiPort}`).replace(':8081', `:${adminPort}`).replace(':8082', `:${opsPort}`)
-      .replace('./data/roi.db', path.join(dir, 'roi.db')).replace(/interval: \S+/, 'interval: 1s')
+      .replace(/^([ \t]*)public_url:.*$/m, '$1public_url: https://reader.example.org').replace('./data/roi.db', path.join(dir, 'roi.db')).replace(/interval: \S+/, 'interval: 1s')
       .replace('login_per_minute: 10', 'login_per_minute: 1000').replace('account_login_per_minute: 60', 'account_login_per_minute: 1000')
       .replace('allow_private_networks: false', 'allow_private_networks: true').replace('per_host_delay: 2s', 'per_host_delay: 0s');
     fs.writeFileSync(path.join(dir, 'config.yaml'), config);
@@ -249,7 +249,63 @@ async function freePorts() {
     assert.equal(await feedTable.locator('td.failures').innerText(), '0');
     await importOPML();
     assert.equal(await feedTable.getByRole('row').count(), 2);
-    const login = await context.request.post(api + '/accounts/ClientLogin', { form: { Email: 'reader', Passwd: 'roi-reader-test' } });
+    async function createPersonalCredentials(name, useUI = false) {
+      if (useUI) {
+        await page.getByRole('button', { name: 'Add API device', exact: true }).click();
+        const dialog = page.locator('#api-device-dialog');
+        await dialog.getByLabel('Device name', { exact: true }).fill(name);
+        await action(dialog.getByRole('button', { name: 'Create device', exact: true }), '/api-devices/create');
+        const credentialsDialog = page.locator('#api-credentials-dialog');
+        await credentialsDialog.waitFor({ state: 'visible' });
+        const credentials = { login: await page.locator('#api-personal-login').inputValue(), code: await page.locator('#api-sign-in-code').inputValue() };
+        assert.equal(await page.locator('#api-reader-url').inputValue(), 'https://reader.example.org/greader');
+        assert.equal(await credentialsDialog.getByRole('button', { name: 'Copy API URL', exact: true }).count(), 1);
+        for (const name of ['Copy API URL', 'Copy login', 'Copy code']) {
+          const button = credentialsDialog.getByRole('button', { name, exact: true });
+          assert.equal(await button.textContent(), '');
+          assert.equal(await button.locator('svg').count(), 1);
+          assert.equal(await button.evaluate(el => {
+            const input = el.parentElement.querySelector('input');
+            const a = input.getBoundingClientRect(), b = el.getBoundingClientRect();
+            return b.left >= a.right && Math.abs(a.top - b.top) <= 1;
+          }), true);
+        }
+        await credentialsDialog.getByRole('button', { name: 'Copy API URL', exact: true }).click();
+        await page.waitForFunction(async () => (await navigator.clipboard.readText()) === 'https://reader.example.org/greader');
+        await page.evaluate(async () => {
+          window.__roiCredentialClipboard = navigator.clipboard;
+          await navigator.clipboard.writeText('cleared');
+          Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async () => { throw Error('denied'); } } });
+        });
+        await credentialsDialog.getByRole('button', { name: 'Copy API URL', exact: true }).click();
+        await page.waitForFunction(async () => (await window.__roiCredentialClipboard.readText()) === 'https://reader.example.org/greader');
+        await page.evaluate(() => {
+          Object.defineProperty(navigator, 'clipboard', { configurable: true, value: window.__roiCredentialClipboard });
+          delete window.__roiCredentialClipboard;
+        });
+        assert.ok(credentials.login.startsWith('device_'));
+        assert.equal(credentials.code.length, 64);
+        await credentialsDialog.getByRole('button', { name: 'Done', exact: true }).click();
+        await page.waitForFunction(() => document.querySelector('#api-sign-in-code').value === '');
+        assert.equal((await page.locator('#api-sign-in-code').inputValue()).length, 0);
+        assert.equal(await page.locator('#api-personal-login').inputValue(), '');
+        return credentials;
+      }
+      const csrf = await page.locator('input[name=csrf]').first().inputValue();
+      const response = await context.request.post(admin + '/api-devices/create', { form: { csrf, device_name: name }, headers: { 'X-ROI-Request': 'async', Accept: 'application/json' } });
+      assert.equal(response.status(), 200);
+      return (await response.json()).credentials;
+    }
+    async function personalLogin(name) {
+      const credentials = await createPersonalCredentials(name);
+      return context.request.post(api + '/accounts/ClientLogin', { form: { Email: credentials.login, Passwd: credentials.code } });
+    }
+    const firstCredentials = await createPersonalCredentials('Browser test device', true);
+    const login = await context.request.post(api + '/accounts/ClientLogin', { form: { Email: firstCredentials.login, Passwd: firstCredentials.code } });
+    assert.equal(login.status(), 200);
+    const replay = await context.request.post(api + '/accounts/ClientLogin', { form: { Email: firstCredentials.login, Passwd: firstCredentials.code } });
+    assert.equal(replay.status(), 403);
+
     const auth = (await login.text()).split('\n').find(line => line.startsWith('Auth=')).slice(5);
     const headers = { Authorization: 'GoogleLogin auth=' + auth };
     const get = async route => { const r = await context.request.get(api + '/reader/api/0/' + route, { headers }); assert.equal(r.status(), 200); return r.json(); };
@@ -487,8 +543,38 @@ async function freePorts() {
       await page.getByRole('button', { name: 'Dark theme' }).click();
       await page.screenshot({ path: path.join(process.env.ROI_SCREENSHOT_DIR, 'admin-dark.png'), fullPage: true });
     }
+    // Personal device actions do not affect other devices or reload the page.
+    const temporaryCredentials = await createPersonalCredentials('Temporary API device', true);
+    const personalTable = page.getByRole('table', { name: 'Reader API devices', exact: true });
+    const temporaryRow = personalTable.locator('tr[data-api-device-id]').filter({ hasText: temporaryCredentials.login });
+    await temporaryRow.getByRole('button', { name: 'Edit API device name', exact: true }).click();
+    await page.locator('#api-device-dialog').getByLabel('Device name', { exact: true }).fill('Renamed temporary device');
+    await action(page.locator('#api-device-dialog').getByRole('button', { name: 'Save name', exact: true }), '/api-devices/rename');
+    assert.ok((await temporaryRow.innerText()).includes('Renamed temporary device'));
+    await temporaryRow.getByRole('button', { name: 'Generate new sign-in code', exact: true }).click();
+    await page.locator('#api-device-confirm-dialog').getByRole('button', { name: 'Cancel', exact: true }).click();
+    await temporaryRow.getByRole('button', { name: 'Generate new sign-in code', exact: true }).click();
+    await action(page.locator('#api-device-confirm-dialog').getByRole('button', { name: 'Confirm', exact: true }), '/api-devices/code');
+    assert.equal(await page.locator('#api-reader-url').inputValue(), 'https://reader.example.org/greader');
+    assert.equal(await page.locator('#api-personal-login').inputValue(), temporaryCredentials.login);
+    const renewedCode = await page.locator('#api-sign-in-code').inputValue();
+    assert.notEqual(renewedCode, temporaryCredentials.code);
+    await page.locator('#api-credentials-dialog').getByRole('button', { name: 'Done', exact: true }).click();
+    const invalidOldCode = await context.request.post(api + '/accounts/ClientLogin', { form: { Email: temporaryCredentials.login, Passwd: temporaryCredentials.code } });
+    assert.equal(invalidOldCode.status(), 403);
+    const temporaryLogin = await context.request.post(api + '/accounts/ClientLogin', { form: { Email: temporaryCredentials.login, Passwd: renewedCode } });
+    assert.equal(temporaryLogin.status(), 200);
+    const temporaryToken = (await temporaryLogin.text()).split('\n').find(line => line.startsWith('Auth=')).slice(5);
+    await temporaryRow.getByRole('button', { name: 'Delete API device', exact: true }).click();
+    await page.locator('#api-device-confirm-dialog').getByRole('button', { name: 'Cancel', exact: true }).click();
+    assert.equal(await temporaryRow.count(), 1);
+    await temporaryRow.getByRole('button', { name: 'Delete API device', exact: true }).click();
+    await action(page.locator('#api-device-confirm-dialog').getByRole('button', { name: 'Confirm', exact: true }), '/api-devices/delete');
+    assert.equal(await temporaryRow.count(), 0);
+    const deletedDevice = await context.request.get(api + '/reader/api/0/user-info', { headers: { Authorization: 'GoogleLogin auth=' + temporaryToken } });
+    assert.equal(deletedDevice.status(), 401);
     // A second Reader session can be inspected and revoked without affecting the first.
-    const secondLogin = await context.request.post(api + '/accounts/ClientLogin', { form: { Email: 'reader', Passwd: 'roi-reader-test' } });
+    const secondLogin = await personalLogin('Second Reader');
     assert.equal(secondLogin.status(), 200);
     const secondAuth = (await secondLogin.text()).split('\n').find(line => line.startsWith('Auth=')).slice(5);
     const secondID = createHash('sha256').update(secondAuth).digest('hex');
@@ -550,7 +636,7 @@ async function freePorts() {
     await page.locator('.build-version').evaluate((element, text) => element.textContent = text, originalVersion);
     // A full pending queue cannot hide an approved device permanently.
     for (let i = 0; i < 100; i++) {
-      const pending = await context.request.post(api + '/accounts/ClientLogin', { form: { Email: 'reader', Passwd: 'roi-reader-test' } });
+      const pending = await personalLogin('Pending Reader ' + i);
       assert.equal(pending.status(), 200);
     }
     await page.waitForFunction(() => document.querySelector('#reader-sessions nav')?.textContent.includes('101 active sessions'), null, { timeout: 15000 });
@@ -564,7 +650,7 @@ async function freePorts() {
     await revokeAction(page.getByRole('button', { name: 'Revoke API tokens', exact: true }), '/revoke-api-tokens');
     const revoked = await context.request.get(api + '/reader/api/0/user-info', { headers });
     assert.equal(revoked.status(), 401);
-    const relogin = await context.request.post(api + '/accounts/ClientLogin', { form: { Email: 'reader', Passwd: 'roi-reader-test' } });
+    const relogin = await personalLogin('Reader after global revoke');
     assert.equal(relogin.status(), 200);
     assert.equal(documentRequests, 0, 'dashboard actions reloaded the document');
     assert.equal(await page.evaluate(() => window.__roiDocumentMarker), 'preserved');

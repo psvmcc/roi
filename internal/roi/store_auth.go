@@ -57,6 +57,9 @@ func (s *Store) RotateSigningKey() (string, error) {
 	if _, e = tx.Exec("UPDATE auth_sessions SET revoked=1 WHERE realm='api'"); e != nil {
 		return "", e
 	}
+	if _, e = tx.Exec("UPDATE api_devices SET code_hash='',code_expires=0; DELETE FROM auth_secrets WHERE name='api_legacy_key'"); e != nil {
+		return "", e
+	}
 	return key, tx.Commit()
 }
 

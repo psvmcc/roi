@@ -166,3 +166,9 @@ button.icon-button.inline-edit, button.icon-button.inline-copy { width: calc(1em
 #import-preview-dialog { width: min(1100px, calc(100vw - 40px)); }
 #import-preview-dialog .scroll { max-height: 50vh; }
 #import-preview-dialog td { overflow-wrap: anywhere; }
+
+.api-devices { margin: 14px 0 28px; max-height: 330px; }
+
+.credential-field { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.credential-field input { flex: 1; min-width: 0; }
+.credential-field .icon-button { flex: 0 0 36px; }

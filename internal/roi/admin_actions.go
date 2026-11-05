@@ -51,6 +51,10 @@ func adminActionMessage(path string) string {
 }
 
 func (a *App) adminAction(w http.ResponseWriter, r *http.Request, cookie *http.Cookie) {
+	if strings.HasPrefix(r.URL.Path, "/api-devices/") {
+		a.adminAPIDevice(w, r)
+		return
+	}
 	var e error
 	switch r.URL.Path {
 	case "/device-feeds":

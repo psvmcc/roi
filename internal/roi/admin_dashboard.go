@@ -33,6 +33,7 @@ type feedPanel struct {
 }
 
 type dashboard struct {
+	APIDevices                                                   []APIDevice
 	CSRF                                                         string
 	Feeds                                                        []Feed
 	RSSPanel, GitPanel                                           feedPanel
@@ -50,6 +51,11 @@ func (a *App) adminDashboard(w http.ResponseWriter, r *http.Request, cookie *htt
 	var e error
 	var err error
 	d := dashboard{CSRF: csrf, DisabledOnly: r.URL.Query().Get("disabled") == "1"}
+	d.APIDevices, err = a.store.APIDevices(r.Context())
+	if err != nil {
+		a.requestError(w, r, err)
+		return
+	}
 	d.RSSPanel = feedPanel{CSRF: csrf, ID: "feed-list", ScrollID: "feed-scroll", Label: "RSS Feeds", DisabledOnly: d.DisabledOnly}
 	d.GitPanel = feedPanel{CSRF: csrf, ID: "git-feed-list", ScrollID: "git-feed-scroll", Label: "GIT Releases Feeds", DisabledOnly: d.DisabledOnly, IsGit: true}
 	d.ReaderSessions = sessionPanel{CSRF: csrf, ScrollID: "reader-session-scroll", Label: "Reader API sessions"}

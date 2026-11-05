@@ -75,7 +75,7 @@
     input.value = value;
     input.readOnly = true;
     input.setAttribute('aria-hidden', 'true');
-    document.body.append(input);
+    (active?.closest('dialog[open]') || document.body).append(input);
     try {
       input.select();
       if (!document.execCommand('copy')) throw new Error('Copy failed. Select the URL and copy it manually.');
@@ -101,6 +101,11 @@
     const error = dialog.querySelector('.dialog-error');
     if (error) { error.hidden = true; error.textContent = ''; }
   }
+  document.querySelector('#api-credentials-dialog').addEventListener('close', () => {
+    document.querySelector('#api-reader-url').value = '';
+    document.querySelector('#api-personal-login').value = '';
+    document.querySelector('#api-sign-in-code').value = '';
+  });
   let pendingImport = null;
   async function previewImport(form) {
     const upload = new FormData(form);
@@ -141,6 +146,18 @@
     if (!(form instanceof HTMLFormElement) || !form.hasAttribute('data-async')) return;
     event.preventDefault();
     if (form.dataset.busy === 'true' || !form.reportValidity()) return;
+    if (form.hasAttribute('data-confirm-device-action')) {
+      const dialog = document.querySelector('#api-device-confirm-dialog');
+      const confirmation = dialog.querySelector('form');
+      const remove = new URL(form.action).pathname === '/api-devices/delete';
+      confirmation.action = form.action;
+      confirmation.querySelector('input[name=device]').value = form.querySelector('input[name=device]').value;
+      dialog.querySelector('h2').textContent = remove ? 'Delete API device?' : 'Generate a new sign-in code?';
+      dialog.querySelector('.api-device-name').textContent = form.closest('[data-api-device-id]').dataset.deviceName;
+      dialog.querySelector('.api-device-description').textContent = remove ? 'Deletes this API access and revokes all of its sessions. Subscriptions and reading state are preserved.' : 'Replaces any unused code. Existing sessions keep working. Each new session requires approval.';
+      dialog.showModal();
+      return;
+    }
     if (form.hasAttribute('data-confirm-revoke')) {
       const dialog = document.querySelector('#revoke-dialog');
       const confirmation = dialog.querySelector('form');
@@ -150,7 +167,7 @@
       const row = form.closest('[data-session-id]');
       const browserSession = path === '/revoke-browser-sessions' || row?.dataset.sessionRealm === 'admin';
       dialog.querySelector('h2').textContent = path === '/revoke-api-tokens' ? 'Revoke all Reader API sessions?' : path === '/revoke-browser-sessions' ? 'Revoke all browser sessions?' : browserSession ? 'Revoke browser session?' : 'Revoke Reader API session?';
-      dialog.querySelector('#revoke-description').textContent = browserSession ? 'The browser must sign in again. Revoking the current session signs you out.' : 'The Reader client must authenticate again. Its new API session will require admin approval.';
+      dialog.querySelector('#revoke-description').textContent = browserSession ? 'The browser must sign in again. Revoking the current session signs you out.' : path === '/revoke-api-tokens' ? 'Revokes all Reader API sessions and unused sign-in codes. Generate new codes to reconnect; every new session requires approval.' : 'The Reader API client must sign in again with a new one-time code. Its new session requires approval.';
       dialog.querySelector('.revoke-name').textContent = row ? (row.dataset.deviceName || (browserSession ? 'Browser session' : 'Unapproved Reader client')) + ' · ' + row.dataset.sessionId.slice(0, 12) : browserSession ? 'All browsers, including this one, will be signed out.' : 'All Reader clients will be signed out.';
       dialog.showModal();
       return;
@@ -180,6 +197,13 @@
       if (dialog) closeDialog(dialog);
       if (['/import', '/import-roi'].includes(new URL(form.action).pathname)) form.reset();
       await refresh();
+      if (result.credentials) {
+        document.querySelector('#api-reader-url').value = result.credentials.api_url || '';
+        document.querySelector('#api-url-fields').hidden = !result.credentials.api_url;
+        document.querySelector('#api-personal-login').value = result.credentials.login;
+        document.querySelector('#api-sign-in-code').value = result.credentials.code;
+        document.querySelector('#api-credentials-dialog').showModal();
+      }
       notify(result.message || 'Saved.');
     } catch (error) {
       const dialogError = form.closest('dialog')?.querySelector('.dialog-error');
@@ -193,6 +217,29 @@
     }
   });
   document.addEventListener('click', event => {
+    const credentialCopy = event.target.closest('[data-copy-credential]');
+    if (credentialCopy) {
+      const value = document.getElementById(credentialCopy.dataset.copyCredential).value;
+      (async () => {
+        try { if (navigator.clipboard?.writeText) { try { await navigator.clipboard.writeText(value); } catch { legacyCopy(value); } } else legacyCopy(value); notify('Copied.'); }
+        catch { notify('Unable to copy. Select the value and copy it manually.', true); }
+      })();
+      return;
+    }
+    const addDevice = event.target.closest('[data-api-device-add]');
+    const editDevice = event.target.closest('[data-api-device-edit]');
+    if (addDevice || editDevice) {
+      const dialog = document.querySelector('#api-device-dialog');
+      const form = dialog.querySelector('form');
+      const row = editDevice?.closest('[data-api-device-id]');
+      form.action = row ? '/api-devices/rename' : '/api-devices/create';
+      form.querySelector('[name=device]').value = row?.dataset.apiDeviceId || '';
+      form.querySelector('[name=device_name]').value = row?.dataset.deviceName || '';
+      dialog.querySelector('h2').textContent = row ? 'Rename API device' : 'Add API device';
+      form.querySelector('[type=submit]').textContent = row ? 'Save name' : 'Create device';
+      dialog.showModal();
+      return;
+    }
     const copy = event.target.closest('[data-copy-url]');
     if (copy) { event.preventDefault(); copyFeedURL(copy); return; }
     const reset = event.target.closest('[data-reset]');

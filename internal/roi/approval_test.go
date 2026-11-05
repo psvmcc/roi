@@ -17,7 +17,7 @@ func TestPendingReaderCannotReadOrMutateBeforeApproval(t *testing.T) {
 	mustExec(t, a, "UPDATE feeds SET title='Private feed' WHERE id=?", id)
 	mustExec(t, a, "INSERT INTO folders VALUES('Private folder')")
 	mustExec(t, a, "INSERT INTO feed_folders VALUES(?,'Private folder')", id)
-	w := apiReq(a, "", "POST", "/accounts/ClientLogin", url.Values{"Email": {"reader"}, "Passwd": {"test-password-123"}})
+	w := apiReq(a, "", "POST", "/accounts/ClientLogin", deviceLoginForm(t, a))
 	if w.Code != 200 {
 		t.Fatal(w.Code, w.Body.String())
 	}

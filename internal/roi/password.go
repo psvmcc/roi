@@ -15,6 +15,9 @@ import (
 
 // HashPassword creates a PHC-encoded Argon2id hash using a fresh random salt.
 func HashPassword(password []byte) (string, error) {
+	return hashPasswordContext(context.Background(), password)
+}
+func hashPasswordContext(ctx context.Context, password []byte) (string, error) {
 	if len(password) < 12 || len(password) > 4096 {
 		return "", fmt.Errorf("password must contain 12 to 4096 bytes")
 	}
@@ -22,16 +25,15 @@ func HashPassword(password []byte) (string, error) {
 	if _, err := rand.Read(salt); err != nil {
 		return "", err
 	}
-	key := derivePassword(password, salt, 3, 64*1024, 4)
+	key, err := derivePasswordContext(ctx, password, salt, 3, 64*1024, 4)
+	if err != nil {
+		return "", err
+	}
 	return fmt.Sprintf("$argon2id$v=19$m=65536,t=3,p=4$%s$%s", base64.RawStdEncoding.EncodeToString(salt), base64.RawStdEncoding.EncodeToString(key)), nil
 }
 
 var argonSlots = make(chan struct{}, 2)
 
-func derivePassword(password, salt []byte, rounds, memory uint32, threads uint8) []byte {
-	key, _ := derivePasswordContext(context.Background(), password, salt, rounds, memory, threads)
-	return key
-}
 func derivePasswordContext(ctx context.Context, password, salt []byte, rounds, memory uint32, threads uint8) ([]byte, error) {
 	select {
 	case argonSlots <- struct{}{}:

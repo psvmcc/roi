@@ -179,7 +179,7 @@ func TestSessionFailureResponsesAndAtomicRotation(t *testing.T) {
 	if w.Code != 500 {
 		t.Fatal("admin failed to reject unavailable session storage", w.Code)
 	}
-	w = apiReq(a, "", "POST", "/accounts/ClientLogin", url.Values{"Email": {"reader"}, "Passwd": {"test-password-123"}})
+	w = apiReq(a, "", "POST", "/accounts/ClientLogin", deviceLoginForm(t, a))
 	if w.Code != 503 {
 		t.Fatal("API failed to reject unavailable session storage", w.Code)
 	}

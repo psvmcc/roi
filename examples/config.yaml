@@ -3,6 +3,7 @@ debug: false # Enable admin/API request logs, including device names.
 api:
   listen: 127.0.0.1:8080
   prefix: /greader
+  public_url: "" # External origin, e.g. https://rss.example.org; api.prefix is appended.
 admin:
   listen: 127.0.0.1:8081
 ops:
@@ -20,10 +21,7 @@ admin_auth:
   username: admin
   # Test password: roi-admin-test
   password_hash: '$argon2id$v=19$m=65536,t=3,p=4$ApbSZlY3HshPpZCIguAZpg$95i7UhUqIN0iw9K4hizaB/WGbaqbw35fDzZiiBdy4b8'
-api_auth:
-  username: reader
-  # Test password: roi-reader-test
-  password_hash: '$argon2id$v=19$m=65536,t=3,p=4$BIBSXen++v1kYGjJNboBVQ$OV0spOSu2gPp5JLV5fmIkS1rzLre0bu7EEhPBhXR6VY'
+# Reader API devices and one-time sign-in codes are managed in the admin.
 
 poll:
   interval: 10m
@@ -46,11 +44,11 @@ security:
   file_permissions: warn # Use strict in production; private config/DB files 0600, data directory 0700.
   parse_concurrency: 2 # Shared by feed fetches, Git discovery and subscription imports.
   parse_memory_bytes: 134217728 # Admission budget, at least 16 MiB and twice poll.max_bytes.
-  real_ip_header: "" # Empty: legacy XFF/X-Real-IP. Example: CF-Connecting-IP or X-Real-IP.
+  real_ip_header: "CF-Connecting-IP" # Empty: legacy XFF/X-Real-IP. Example: CF-Connecting-IP or X-Real-IP.
   # Forwarded client addresses are ignored unless the immediate peer is trusted.
   # Accepts individual IPv4/IPv6 addresses and CIDR networks in the same list.
   # With an empty real_ip_header, XFF takes precedence over X-Real-IP.
-  trusted_proxies: [] # e.g. ['127.0.0.1', '::1', '10.20.0.0/24']
+  trusted_proxies: ['127.0.0.1'] # e.g. ['127.0.0.1', '::1', '10.20.0.0/24']
   # For a local nginx proxy:
   # trusted_proxies:
   #   - 127.0.0.1

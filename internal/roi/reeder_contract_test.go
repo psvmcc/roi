@@ -68,7 +68,7 @@ func TestReederClassicSyncContractOverHTTP(t *testing.T) {
 		return data
 	}
 	route := func(name string) string { return "/reader/api/0/" + name }
-	login := call("POST", "/accounts/ClientLogin", url.Values{"Email": {"reader"}, "Passwd": {"test-password-123"}}, 200)
+	login := call("POST", "/accounts/ClientLogin", deviceLoginForm(t, a), 200)
 	for _, line := range strings.Split(string(login), "\n") {
 		if strings.HasPrefix(line, "Auth=") {
 			auth = strings.TrimPrefix(line, "Auth=")

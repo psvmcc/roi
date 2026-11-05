@@ -12,29 +12,26 @@ Requirements: Go 1.27.3+ and [just](https://github.com/casey/just).
 just run
 ```
 
-By default, `just run` uses [examples/config.yaml](examples/config.yaml), which contains working local test credentials:
+By default, `just run` uses [examples/config.yaml](examples/config.yaml), which contains working local admin test credentials:
 
 | Service | Username | Password |
 | --- | --- | --- |
 | Admin | `admin` | `roi-admin-test` |
-| Reader API | `reader` | `roi-reader-test` |
 
-The example includes these passwords as comments next to their Argon2id hashes. For your own instance, copy it and generate separate passwords:
+The example includes the admin password as a comment next to its Argon2id hash. Reader API credentials are created in the admin. For your own instance, copy it and generate an admin password:
 
 ```sh
 just build
 cp examples/config.yaml config.yaml
 ./bin/roi password-hash
 # Paste the hash into admin_auth.password_hash.
-./bin/roi password-hash
-# Paste the second hash into api_auth.password_hash.
 chmod 600 config.yaml
 ./bin/roi --config config.yaml --check-config
 ./bin/roi --config config.yaml
 # Or: just run config.yaml
 ```
 
-`password-hash` reads the password from the terminal without echoing it. Passwords must contain 12–4096 bytes. New hashes use PHC-encoded Argon2id (64 MiB, three passes, four lanes, a random 16-byte salt and a 32-byte key). Legacy bcrypt hashes remain accepted to allow migration; regenerate them with this command. Store the hashes in YAML and enter the original Reader API password in your reader.
+`password-hash` reads the password from the terminal without echoing it. Passwords must contain 12–4096 bytes. New hashes use PHC-encoded Argon2id (64 MiB, three passes, four lanes, a random 16-byte salt and a 32-byte key). Legacy bcrypt hashes remain accepted to allow migration; regenerate them with this command. Store the admin hash in YAML. Personal Reader API sign-in codes are generated in the admin and are entered as passwords in your reader.
 
 Default addresses:
 
@@ -123,15 +120,25 @@ ROI_CONFIG=examples/config.yaml ROI_CHECK_CONFIG=true ./bin/roi
 ./bin/roi password-hash --help
 ```
 
-`./bin/roi --config config.yaml rotate-api-key` rotates the persisted signing key while roi is stopped. Start roi again afterward. For immediate revocation on a running instance, use **Revoke API tokens** in the admin; the admin session stays signed in. Every new Reader API login creates a **Pending approval** session. The client can finish account setup but receives empty subscription, folder, unread, item ID and article responses until an admin approves it; API changes are denied before approval. In **Reader API sessions**, select **Approve device**, enter a device name and confirm. Then sync the Reader client again using the same session token. Approval and names persist across restarts. Every new token requires separate approval, even if its IP or User-Agent matches an approved device. The upgrade also puts existing API sessions into pending approval. Device names can be edited afterward.
+Set `api.public_url` to the external API origin (for example `https://rss.example.org`, optionally including a port). ROI appends `api.prefix` automatically: with `/greader`, the credentials dialog shows `https://rss.example.org/greader` alongside the login and one-time code, with a copy button. The same URL appears when regenerating a code and in the HTML response without JavaScript. Leave it empty to omit the URL. It is a display setting and does not change listeners; paths, credentials, query strings and fragments are rejected.
 
-The **Reader API sessions** block lists active Reader sessions with individual revocation and a revoke-all action. **Browser sessions** appears immediately below it for active admin sessions. Revoked and expired sessions are hidden from both lists. Each table shows 100 sessions per page, with Previous/Next navigation and the total active count. Approved Reader sessions remain accessible on later pages even when pending requests fill the first page. Tables include creation, last use, first/last IP, request count and client. Browser sessions additionally show expiry. Each session has an individual **Revoke session** action. Revoking the current browser session signs it out. Both API and browser sessions survive restarts. Reader API sessions remain valid until explicitly revoked, signing-key rotation or an API credential change. The legacy `security.token_ttl` configuration field is accepted but ignored. Browser sessions expire 24 hours after login; changing the admin username or password hash revokes all browser sessions on startup, independently of API sessions. IP and User-Agent changes do not end a session. SQLite stores the hashed cookie identifier and CSRF token; the raw cookie stays in the browser. At most 100 unapproved Reader sessions remain active; new logins revoke the least recently used pending session without evicting approved clients. Security-event snapshots remain available. At most 100 browser sessions remain active; a new login revokes the least recently used session when necessary. Upgrading from a version without persistent browser sessions requires signing in once. Upgrading from a version without registered API sessions requires Reader clients to authenticate once again. Session identifiers displayed in the admin are SHA-256 digests, never bearer tokens. The **Security events** table shows the latest 100 failed logins, rejected requests, rate limits, successful logins, device approvals and session revocations. Security metadata persists in SQLite for up to 30 days and 10,000 events. Ordinary requests are written to server logs only when `debug: true`. Static assets and background fragment refreshes are omitted from the event log. With `debug: true`, API requests and admin actions include the client IP and device identity in server logs. Forwarded addresses are accepted only from explicitly trusted proxies.
+Create a personal Reader API access in **Reader API devices → Add API device**. Enter a device name; roi generates a unique, permanent login and a random one-time sign-in code. The plaintext code is shown only in that response and cleared from the credentials dialog when it closes. Copy both values into a Google Reader API account in Reeder, using the code as its password. The code expires after 24 hours or its first successful `ClientLogin`; it is stored only as an Argon2id hash and is erased on consumption. Consuming the code and creating its session form one SQLite transaction. Wrong passwords do not consume it, and concurrent attempts can create at most one session. A lost login response requires generating a new code.
+
+Every successful sign-in creates a named **Pending approval** session. The client can finish account setup but receives empty subscription, folder, unread, item ID and article responses until an admin approves it; mutations are denied. Select **Approve device** in **Reader API sessions**, confirm the name, then sync the client again. Every new session requires approval, including a second sign-in for the same device. Sessions do not expire automatically. Use a different personal login on every physical device; clients that synchronize one shared account/token still share that session.
+
+**Generate new sign-in code** replaces any unused code after confirmation, preserving the login and existing sessions. Use it if a code was lost/expired or Reeder needs to authenticate again. Renaming a device updates its session names without changing the login. **Delete API device** requires confirmation and revokes all of that device's sessions; subscriptions and reading state are preserved. Individual session revocation and **Hide feeds / Show feeds** remain available.
+
+`./bin/roi --config config.yaml rotate-api-key` rotates the persisted signing key while roi is stopped. For immediate revocation on a running instance, use **Revoke API tokens** in the admin. Both actions revoke Reader sessions and invalidate unused sign-in codes; admin sessions stay signed in. Generate new codes to reconnect.
+
+The deprecated `api_auth` YAML block never accepts new logins. During an upgrade, keep the existing block for the first startup so roi can preserve validation of existing legacy tokens in SQLite; it can then be removed. Existing sessions are not automatically migrated to personal logins. Add a personal device for each client, reconnect and approve it, verify separate session IDs, then manually revoke the old shared sessions. Changing a retained legacy `api_auth` block revokes only legacy sessions; personal device sessions are independent of that config. The public example has no `api_auth` block.
+
+The **Reader API sessions** block lists active Reader sessions with individual revocation and a revoke-all action. **Browser sessions** appears immediately below it for active admin sessions. Revoked and expired sessions are hidden from both lists. Each table shows 100 sessions per page, with Previous/Next navigation and the total active count. Approved Reader sessions remain accessible on later pages even when pending requests fill the first page. Tables include creation, last use, first/last IP, request count and client. Browser sessions additionally show expiry. Each session has an individual **Revoke session** action. Revoking the current browser session signs it out. Both API and browser sessions survive restarts. Reader API sessions remain valid until explicitly revoked, device deletion or signing-key rotation. The legacy `security.token_ttl` configuration field is accepted but ignored. Browser sessions expire 24 hours after login; changing the admin username or password hash revokes all browser sessions on startup, independently of API sessions. IP and User-Agent changes do not end a session. SQLite stores the hashed cookie identifier and CSRF token; the raw cookie stays in the browser. At most 100 unapproved Reader sessions remain active; new logins revoke the least recently used pending session without evicting approved clients. Security-event snapshots remain available. At most 100 browser sessions remain active; a new login revokes the least recently used session when necessary. Upgrading from a version without persistent browser sessions requires signing in once. Upgrading from a version without registered API sessions requires Reader clients to authenticate once again. Session identifiers displayed in the admin are SHA-256 digests, never bearer tokens. The **Security events** table shows the latest 100 failed logins, rejected requests, rate limits, successful logins, device approvals and session revocations. Security metadata persists in SQLite for up to 30 days and 10,000 events. Ordinary requests are written to server logs only when `debug: true`. Static assets and background fragment refreshes are omitted from the event log. With `debug: true`, API requests and admin actions include the client IP and device identity in server logs. Forwarded addresses are accepted only from explicitly trusted proxies.
 
 The binary defaults to `config.yaml` in its working directory. `ROI_CONFIG` overrides the configuration path; `ROI_CHECK_CONFIG` validates it without starting the servers or opening the database. Other application settings are configured in YAML.
 
 ## Reeder Classic
 
-Choose a **Google Reader API** account in [Reeder Classic](https://reederapp.com/classic/). Enter the Reader API base URL, `api_auth.username`, and the original API password. For example, use `https://rss.example.org/greader`. Do not append `/reader/api/0` or `.php`.
+Choose a **Google Reader API** account in [Reeder Classic](https://reederapp.com/classic/). Enter the Reader API base URL, the personal login created in the admin, and its unused sign-in code as the password. For example, use `https://rss.example.org/greader`. Do not append `/reader/api/0` or `.php`.
 
 Implemented endpoints: `accounts/ClientLogin`, `token`, `user-info`, `preference/list`, `preference/stream/list`, `subscription/list`, `tag/list`, `unread-count`, `stream/items/ids`, `stream/items/contents`, `stream/contents/*`, `edit-tag`, `mark-all-as-read`, `subscription/quickadd`, `subscription/edit`, `rename-tag`, and `disable-tag`.
 
@@ -161,8 +168,9 @@ Configuration uses YAML with `#` comments. Unknown fields, duplicate keys, multi
 
 - `api.listen`, `admin.listen`, `ops.listen`: separate `host:port` addresses.
 - `api.prefix`: base path without a trailing slash; an empty string is allowed. Internal protocol paths are fixed.
+- `api.public_url`: optional external HTTP(S) origin shown with sign-in credentials; the API prefix is appended automatically.
 - `database`: SQLite file path, relative to the process working directory if not absolute.
-- `admin_auth`, `api_auth`: independent credentials. Changing the API hash invalidates previously issued API tokens.
+- `admin_auth`: admin username and password hash. Reader API devices and one-time codes are managed in the admin and stored in SQLite. `api_auth` is accepted only to migrate existing legacy sessions.
 - `poll.interval`: base interval, such as `15m` or `1h`; allowed range: 1 second to 720 hours.
 - `poll.timeout`: HTTP request timeout, including redirects and response reading.
 - `poll.workers`: 1–32 concurrent workers across different host groups.
@@ -356,7 +364,7 @@ The browser suite creates temporary databases and localhost-only RSS servers. It
 
 ### Authentication, proxy trust, and request limits
 
-API token signatures use a random 256-bit key persisted in SQLite, independently of the password hashes in YAML. Knowing the API hash alone cannot produce a valid token. Reader API sessions do not expire automatically. Existing active API sessions are upgraded on startup without requiring a new client login. Changing API credentials or revoking tokens invalidates existing sessions. Protect database/WAL backups as well as the configuration.
+API token signatures use a random 256-bit key persisted in SQLite, independently of the password hashes in YAML. Knowing the API hash alone cannot produce a valid token. Reader API sessions do not expire automatically. Existing active API sessions are upgraded on startup without requiring a new client login. Revoking tokens invalidates sessions and unused sign-in codes. Changing the deprecated API config affects legacy sessions only. Protect database/WAL backups as well as the configuration.
 
 The `security` section supports:
 

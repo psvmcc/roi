@@ -9,12 +9,10 @@ import (
 	"net/http"
 	"strings"
 	"time"
-	"unicode"
-	"unicode/utf8"
 )
 
 type sessionContextKey struct{}
-type requestIdentity struct{ ID string }
+type requestIdentity struct{ ID, TargetDevice string }
 
 func identifySession(r *http.Request, id string) {
 	if identity, ok := r.Context().Value(sessionContextKey{}).(*requestIdentity); ok {
@@ -28,6 +26,7 @@ func sessionID(token string) string {
 
 type SessionInfo struct {
 	ID, Realm, FirstIP, LastIP, Client, State, DeviceName string
+	Login                                                 string
 	Approved                                              bool
 	FeedsHidden                                           bool
 	Created, Expires, LastSeen, Requests                  int64
@@ -101,7 +100,7 @@ func (a *App) sessionList(current string) ([]SessionInfo, error) {
 	return a.querySessions(current, "", 0)
 }
 func (a *App) querySessions(current, realm string, page int) ([]SessionInfo, error) {
-	query := `SELECT id,realm,created,expires,last_seen,first_ip,last_ip,client,requests,CASE WHEN realm='api' AND approved=0 THEN 'Pending approval' ELSE 'Active' END,device_name,approved,feeds_hidden FROM auth_sessions WHERE revoked=0 AND (expires>? OR (realm='api' AND expires=0))`
+	query := `SELECT id,realm,created,expires,last_seen,first_ip,last_ip,client,requests,CASE WHEN realm='api' AND approved=0 THEN 'Pending approval' ELSE 'Active' END,device_name,approved,feeds_hidden,COALESCE((SELECT login FROM api_devices WHERE id=auth_sessions.device_id),'') FROM auth_sessions WHERE revoked=0 AND (expires>? OR (realm='api' AND expires=0))`
 	args := []any{time.Now().Unix()}
 	if realm != "" {
 		query += " AND realm=?"
@@ -120,7 +119,7 @@ func (a *App) querySessions(current, realm string, page int) ([]SessionInfo, err
 	list := []SessionInfo{}
 	for rows.Next() {
 		var s SessionInfo
-		if err = rows.Scan(&s.ID, &s.Realm, &s.Created, &s.Expires, &s.LastSeen, &s.FirstIP, &s.LastIP, &s.Client, &s.Requests, &s.State, &s.DeviceName, &s.Approved, &s.FeedsHidden); err != nil {
+		if err = rows.Scan(&s.ID, &s.Realm, &s.Created, &s.Expires, &s.LastSeen, &s.FirstIP, &s.LastIP, &s.Client, &s.Requests, &s.State, &s.DeviceName, &s.Approved, &s.FeedsHidden, &s.Login); err != nil {
 			return nil, err
 		}
 		s.Current = s.ID == current
@@ -131,7 +130,7 @@ func (a *App) querySessions(current, realm string, page int) ([]SessionInfo, err
 
 // Security events are kept independently of ordinary request logs. The existing
 // auth_events table stores only security metadata; old request rows are filtered.
-const securityEventSQL = `status IN (401,403,429) OR (method='POST' AND (path='/login' OR path LIKE '%/accounts/ClientLogin' OR path IN ('/approve-session','/device-feeds','/revoke-session','/revoke-api-tokens','/revoke-browser-sessions','/logout')))`
+const securityEventSQL = `status IN (401,403,429) OR (method='POST' AND (path='/login' OR path LIKE '%/accounts/ClientLogin' OR path IN ('/approve-session','/device-feeds','/revoke-session','/revoke-api-tokens','/revoke-browser-sessions','/logout','/api-devices/create','/api-devices/code','/api-devices/rename','/api-devices/delete')))`
 
 type SecurityEvent struct {
 	APIRequest
@@ -139,6 +138,18 @@ type SecurityEvent struct {
 }
 
 func securityEventKind(e APIRequest) string {
+	if e.Method == "POST" && e.Status < 400 {
+		switch e.Path {
+		case "/api-devices/create":
+			return "API device created"
+		case "/api-devices/code":
+			return "API sign-in code generated"
+		case "/api-devices/rename":
+			return "API device renamed"
+		case "/api-devices/delete":
+			return "API device deleted"
+		}
+	}
 	if e.Status == 429 {
 		return "Rate limit exceeded"
 	}
@@ -223,6 +234,10 @@ func (a *App) auditHandler(realm string, next http.Handler) http.Handler {
 			}
 			event := APIRequest{Time: time.Now().Unix(), Realm: realm, Session: identity.ID, IP: a.clientIP(r), Method: r.Method, Path: logText(r.URL.Path), Client: logText(r.UserAgent()), Status: status, Bytes: rw.bytes, Duration: time.Since(started).Milliseconds()}
 			a.enrichEvent(&event, r)
+			if identity.TargetDevice != "" {
+				event.Device = identity.TargetDevice
+				event.DeviceState = "api-device"
+			}
 			a.recordEvent(event)
 		}()
 		next.ServeHTTP(rw, r)
@@ -248,8 +263,8 @@ func shortSession(id string) string {
 	return fmt.Sprintf("%s…", id[:min(12, len(id))])
 }
 
-// Browser and Reader sessions survive restarts while their respective configured
-// credentials remain unchanged. Credential changes revoke only the relevant realm.
+// Personal Reader sessions are independent of YAML credentials. Admin credential
+// changes revoke browsers; deprecated API credentials affect only legacy sessions.
 func (s *Store) initializeSessions(c Config) error {
 	tx, err := s.DB.Begin()
 	if err != nil {
@@ -259,7 +274,7 @@ func (s *Store) initializeSessions(c Config) error {
 	for _, entry := range []struct {
 		realm       string
 		credentials Credentials
-	}{{"api", c.APIAuth}, {"admin", c.AdminAuth}} {
+	}{{"admin", c.AdminAuth}} {
 		digest := sessionID(entry.credentials.Username + "\x00" + entry.credentials.PasswordHash)
 		name := entry.realm + "_credentials"
 		if _, err = tx.Exec("UPDATE auth_sessions SET revoked=1 WHERE realm=? AND (COALESCE((SELECT value FROM auth_secrets WHERE name=?),'')<>? OR (realm='admin' AND csrf=''))", entry.realm, name, digest); err != nil {
@@ -267,6 +282,25 @@ func (s *Store) initializeSessions(c Config) error {
 		}
 		if _, err = tx.Exec("INSERT INTO auth_secrets(name,value) VALUES(?,?) ON CONFLICT(name) DO UPDATE SET value=excluded.value", name, digest); err != nil {
 			return err
+		}
+	}
+	// Preserve existing pre-device tokens during a controlled migration. The
+	// deprecated config is never accepted by ClientLogin and can be removed
+	// after this key has been saved. New personal sessions are independent of it.
+	if c.APIAuth.Username != "" {
+		digest := sessionID(c.APIAuth.Username + "\x00" + c.APIAuth.PasswordHash)
+		if _, err = tx.Exec("UPDATE auth_sessions SET revoked=1 WHERE realm='api' AND device_id=0 AND COALESCE((SELECT value FROM auth_secrets WHERE name='api_credentials'),'')<>?", digest); err != nil {
+			return err
+		}
+		var root string
+		if err = tx.QueryRow("SELECT value FROM auth_secrets WHERE name='api'").Scan(&root); err != nil {
+			return err
+		}
+		legacy := sign(root, "roi-api-v2\n"+c.APIAuth.Username+"\n"+c.APIAuth.PasswordHash)
+		for name, value := range map[string]string{"api_credentials": digest, "api_legacy_key": legacy} {
+			if _, err = tx.Exec("INSERT INTO auth_secrets(name,value) VALUES(?,?) ON CONFLICT(name) DO UPDATE SET value=excluded.value", name, value); err != nil {
+				return err
+			}
 		}
 	}
 	// Preserve currently active Reader clients across the no-expiry upgrade.
@@ -336,10 +370,15 @@ func (a *App) setDeviceFeedsHidden(id string, hidden bool) error {
 // device never grants access; approval and its required device name are atomic.
 func (a *App) nameSession(id, name string, approve bool) error {
 	name = strings.TrimSpace(name)
-	if !utf8.ValidString(name) || len([]rune(name)) < 1 || len([]rune(name)) > 128 || strings.ContainsFunc(name, unicode.IsControl) {
+	if !validDeviceName(name) {
 		return clientError("device name must contain 1 to 128 characters without control characters")
 	}
-	result, err := a.store.DB.Exec("UPDATE auth_sessions SET device_name=?,approved=CASE WHEN ? THEN 1 ELSE approved END WHERE id=? AND realm='api' AND revoked=0 AND (expires=0 OR expires>?)", name, approve, id, time.Now().Unix())
+	tx, err := a.store.DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.Exec("UPDATE auth_sessions SET device_name=?,approved=CASE WHEN ? THEN 1 ELSE approved END WHERE id=? AND realm='api' AND revoked=0 AND (expires=0 OR expires>?)", name, approve, id, time.Now().Unix())
 	if err != nil {
 		return err
 	}
@@ -350,7 +389,13 @@ func (a *App) nameSession(id, name string, approve bool) error {
 	if n == 0 {
 		return clientError("unknown or inactive Reader session")
 	}
-	return nil
+	if _, err = tx.Exec("UPDATE api_devices SET name=? WHERE id=(SELECT device_id FROM auth_sessions WHERE id=?)", name, id); err != nil {
+		return err
+	}
+	if _, err = tx.Exec("UPDATE auth_sessions SET device_name=? WHERE device_id>0 AND device_id=(SELECT device_id FROM auth_sessions WHERE id=?)", name, id); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (a *App) enrichEvent(event *APIRequest, r *http.Request) {
@@ -383,7 +428,10 @@ func (a *App) enrichEvent(event *APIRequest, r *http.Request) {
 		event.Device = name
 		event.DeviceState = "approved"
 	} else {
-		event.Device = "unapproved"
+		event.Device = name
+		if name == "" {
+			event.Device = "unapproved"
+		}
 		event.DeviceState = "unapproved"
 	}
 }

@@ -22,7 +22,7 @@ func TestReaderAPI(t *testing.T) {
 	if w := apiReq(a, "", "GET", "/reader/api/0/user-info", nil); w.Code != 401 {
 		t.Fatal(w.Code)
 	}
-	w := apiReq(a, "", "POST", "/accounts/ClientLogin", url.Values{"Email": {"reader"}, "Passwd": {"test-password-123"}})
+	w := apiReq(a, "", "POST", "/accounts/ClientLogin", deviceLoginForm(t, a))
 	if w.Code != 200 {
 		t.Fatal(w.Body.String())
 	}
