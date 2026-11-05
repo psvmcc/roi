@@ -33,6 +33,10 @@ func syncErrorCategory(err error, status int, stage string) string {
 	if status != 0 && (status < 200 || status >= 300 && status != 304) {
 		return "HTTP"
 	}
+	var compression *gitCompressionError
+	if errors.As(err, &compression) {
+		return "Network"
+	}
 	if stage == "parse" {
 		return "Parse"
 	}

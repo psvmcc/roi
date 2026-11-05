@@ -1,7 +1,10 @@
 package roi
 
 import (
+	"compress/flate"
+	"compress/gzip"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -34,9 +37,39 @@ func (p *Poller) gitSizeError(raw string, budget *gitBudget) error {
 	return &gitSizeError{URL: raw, Limit: budget.Limit, Received: budget.Received, ConfiguredLimit: p.config.Poll.MaxBytes}
 }
 
+type gitCompressionError struct {
+	URL string
+	Err error
+}
+
+func (e *gitCompressionError) Error() string {
+	return fmt.Sprintf("cannot decompress HTTP response from %s: %v", e.URL, e.Err)
+}
+func (e *gitCompressionError) Unwrap() error { return e.Err }
+
+func compressedBodyError(err error) bool {
+	var corrupt flate.CorruptInputError
+	return errors.As(err, &corrupt) || errors.Is(err, gzip.ErrHeader) || errors.Is(err, gzip.ErrChecksum) || errors.Is(err, io.ErrUnexpectedEOF)
+}
+
 // API responses, discovery and commit lookups share a bounded budget and the
 // same DNS/IP checks as ordinary feeds. Redirects cannot forward host credentials.
 func (p *Poller) gitGet(ctx context.Context, raw, token string, budget *gitBudget, nextPage ...*bool) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, p.config.timeout())
+	defer cancel()
+	body, err := p.gitGetAttempt(ctx, raw, token, budget, false, nextPage...)
+	var compression *gitCompressionError
+	if !errors.As(err, &compression) {
+		return body, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	p.metrics.GetOrCreateCounter("roi_git_identity_retries_total").Inc()
+	return p.gitGetAttempt(ctx, raw, token, budget, true, nextPage...)
+}
+
+func (p *Poller) gitGetAttempt(ctx context.Context, raw, token string, budget *gitBudget, identity bool, nextPage ...*bool) ([]byte, error) {
 	if budget.Received >= budget.Limit {
 		return nil, p.gitSizeError(raw, budget)
 	}
@@ -51,6 +84,9 @@ func (p *Poller) gitGet(ctx context.Context, raw, token string, budget *gitBudge
 		return nil, err
 	}
 	req.Header.Set("User-Agent", defaultUserAgent)
+	if identity {
+		req.Header.Set("Accept-Encoding", "identity")
+	}
 	req.Header.Set("Accept", "application/json")
 	if q, e := gitwebQuery(req.URL.RawQuery); e == nil && q.Get("p") != "" {
 		req.Header.Set("Accept", "text/html, application/xhtml+xml")
@@ -107,17 +143,23 @@ func (p *Poller) gitGet(ctx context.Context, raw, token string, budget *gitBudge
 	if resp.StatusCode != http.StatusOK {
 		return nil, &gitHTTPError{resp.StatusCode, retry}
 	}
+	if encoding := resp.Header.Get("Content-Encoding"); identity && !resp.Uncompressed && encoding != "" && !strings.EqualFold(encoding, "identity") {
+		return nil, &gitCompressionError{raw, fmt.Errorf("server returned %s despite Accept-Encoding: identity", encoding)}
+	}
 	hasNext := strings.Contains(resp.Header.Get("Link"), `rel="next"`) || resp.Header.Get("X-Next-Page") != ""
-	if len(nextPage) > 0 {
-		*nextPage[0] = hasNext
-	}
 	b, err := io.ReadAll(io.LimitReader(resp.Body, budget.Limit-budget.Received+1))
-	if err != nil {
-		return nil, err
-	}
 	budget.Received += int64(len(b))
 	if budget.Received > budget.Limit {
 		return nil, p.gitSizeError(raw, budget)
+	}
+	if err != nil {
+		if resp.Uncompressed && compressedBodyError(err) {
+			return nil, &gitCompressionError{raw, err}
+		}
+		return nil, err
+	}
+	if len(nextPage) > 0 {
+		*nextPage[0] = hasNext
 	}
 	if err = p.cacheGit(ctx, cacheKey, gitCacheEntry{ETag: resp.Header.Get("ETag"), Modified: resp.Header.Get("Last-Modified"), Body: b, Next: hasNext}); err != nil {
 		return nil, err
