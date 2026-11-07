@@ -191,3 +191,6 @@ button.icon-button.inline-edit, button.icon-button.inline-copy { width: calc(1em
 
 #backup-statistics summary, #subscription-backups summary { cursor: pointer; font-weight: 600; padding: 12px 0; }
 #backup-statistics td, #subscription-backups td { overflow-wrap: anywhere; }
+
+
+.credential-field button:disabled { cursor: not-allowed; }

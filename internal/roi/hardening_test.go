@@ -87,7 +87,7 @@ func TestIndependentSigningKeyMigrationPersistenceAndRevocation(t *testing.T) {
 		t.Fatal(fs, e)
 	}
 	var version int
-	if e = a.store.DB.QueryRow("PRAGMA user_version").Scan(&version); e != nil || version != 15 {
+	if e = a.store.DB.QueryRow("PRAGMA user_version").Scan(&version); e != nil || version != 19 {
 		t.Fatal(version, e)
 	}
 	if a.validToken(token) {

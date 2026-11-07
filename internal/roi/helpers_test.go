@@ -3,6 +3,7 @@ package roi
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"io"
 	"net/http/httptest"
 	"net/url"
@@ -48,6 +49,10 @@ func testApp(t *testing.T) *App {
 	if e != nil {
 		t.Fatal(e)
 	}
+	// Unit fixtures never contact external websites for optional icon discovery.
+	a.poller.findSiteIcon = func(context.Context, string, string) (string, error) {
+		return "", errors.New("site icon lookup disabled in unit fixture")
+	}
 	t.Cleanup(func() {
 		if e := a.Close(); e != nil {
 			t.Error(e)
@@ -76,6 +81,26 @@ func rollbackReviewMigration(t *testing.T, db *sql.DB) {
 	}
 	if version < 11 {
 		return
+	}
+	if version >= 19 {
+		if _, err := db.Exec("ALTER TABLE feeds DROP COLUMN site_auto"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if version >= 18 {
+		if _, err := db.Exec("ALTER TABLE feeds DROP COLUMN icon_checked; ALTER TABLE feeds DROP COLUMN icon_site"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if version >= 17 {
+		if _, err := db.Exec("ALTER TABLE feeds DROP COLUMN icon_override"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if version >= 16 {
+		if _, err := db.Exec("ALTER TABLE feeds DROP COLUMN site_override"); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if version >= 15 {
 		if _, err := db.Exec("DROP TABLE subscription_backup_state"); err != nil {

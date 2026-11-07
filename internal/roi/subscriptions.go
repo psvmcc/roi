@@ -21,6 +21,7 @@ type roiSource struct {
 	Type           string   `yaml:"type,omitempty"`
 	URL            string   `yaml:"url,omitempty"`
 	SiteURL        string   `yaml:"site_url,omitempty"`
+	SiteOverride   string   `yaml:"site_url_override,omitempty"`
 	Folders        []string `yaml:"folders,omitempty"`
 	Repository     string   `yaml:"repository,omitempty"`
 	Service        string   `yaml:"service,omitempty"`
@@ -31,6 +32,7 @@ type roiSource struct {
 	Enabled        *bool    `yaml:"enabled,omitempty"`
 	Paused         bool     `yaml:"paused"`
 	IconURL        string   `yaml:"icon_url,omitempty"`
+	IconOverride   string   `yaml:"icon_url_override,omitempty"`
 }
 
 func (s *Store) ExportROI(w io.Writer) error {
@@ -43,7 +45,7 @@ func (s *Store) exportROI(ctx context.Context, w io.Writer) error {
 		return err
 	}
 	defer tx.Rollback()
-	rows, err := tx.QueryContext(ctx, `SELECT id,url,title,site,active,paused,git_provider,git_mode,git_preview,icon_url,user_agent,git_tag_filter FROM feeds ORDER BY url`)
+	rows, err := tx.QueryContext(ctx, `SELECT id,url,title,CASE WHEN site_auto<>'' THEN site_auto WHEN site_override='' THEN site ELSE '' END,active,paused,git_provider,git_mode,git_preview,icon_url,user_agent,git_tag_filter,site_override,icon_override FROM feeds ORDER BY url`)
 	if err != nil {
 		return err
 	}
@@ -54,7 +56,7 @@ func (s *Store) exportROI(ctx context.Context, w io.Writer) error {
 		var provider string
 		var enabled bool
 		var entry roiSource
-		if err = rows.Scan(&id, &entry.URL, &entry.Title, &entry.SiteURL, &enabled, &entry.Paused, &provider, &entry.Mode, &entry.IncludePreview, &entry.IconURL, &entry.UserAgent, &entry.TagFilter); err != nil {
+		if err = rows.Scan(&id, &entry.URL, &entry.Title, &entry.SiteURL, &enabled, &entry.Paused, &provider, &entry.Mode, &entry.IncludePreview, &entry.IconURL, &entry.UserAgent, &entry.TagFilter, &entry.SiteOverride, &entry.IconOverride); err != nil {
 			rows.Close()
 			return err
 		}

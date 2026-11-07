@@ -108,7 +108,20 @@ func (a *App) adminAction(w http.ResponseWriter, r *http.Request, cookie *http.C
 			return
 		}
 		a.poller.Cancel(id)
-		if err = a.store.SetFeedUserAgent(id, r.FormValue("user_agent")); err != nil {
+		var feedURL, website *string
+		if r.Form.Has("url") {
+			value := r.FormValue("url")
+			feedURL = &value
+		}
+		if r.Form.Has("site_override") {
+			value := r.FormValue("site_override")
+			website = &value
+		}
+		var icons []string
+		if r.Form.Has("icon_override") {
+			icons = []string{r.FormValue("icon_override")}
+		}
+		if err = a.store.SetRSSSettings(id, r.FormValue("user_agent"), feedURL, website, icons...); err != nil {
 			a.adminStoreError(w, r, err)
 			return
 		}
@@ -118,6 +131,16 @@ func (a *App) adminAction(w http.ResponseWriter, r *http.Request, cookie *http.C
 		if err != nil || id < 0 {
 			http.Error(w, "invalid id", http.StatusBadRequest)
 			return
+		}
+		var icons []string
+		if r.Form.Has("icon_override") {
+			icons = []string{r.FormValue("icon_override")}
+		}
+		if len(icons) > 0 {
+			if err := validateIconOverride(strings.TrimSpace(icons[0])); err != nil {
+				a.adminStoreError(w, r, err)
+				return
+			}
 		}
 		raw, provider, icon := r.FormValue("repository"), r.FormValue("provider"), ""
 		if provider == "" {
@@ -146,7 +169,7 @@ func (a *App) adminAction(w http.ResponseWriter, r *http.Request, cookie *http.C
 			source.Icon = icon
 			a.poller.Cancel(id)
 		}
-		if err = a.store.SaveGitSource(id, source); err != nil {
+		if err = a.store.SaveGitSource(id, source, icons...); err != nil {
 			a.adminStoreError(w, r, err)
 			return
 		}

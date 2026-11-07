@@ -136,7 +136,7 @@ func normalizeSubscription(entry roiSource) (importSubscription, error) {
 		if err := validateTagFilter(entry.TagFilter); err != nil {
 			return importSubscription{}, err
 		}
-		if entry.URL != "" || entry.SiteURL != "" || len(entry.Folders) != 0 || entry.UserAgent != "" {
+		if entry.URL != "" || entry.SiteURL != "" || entry.SiteOverride != "" || len(entry.Folders) != 0 || entry.UserAgent != "" {
 			return importSubscription{}, fmt.Errorf("git sources cannot specify RSS fields")
 		}
 		if entry.Service == "auto" {
@@ -171,6 +171,11 @@ func normalizeSubscription(entry roiSource) (importSubscription, error) {
 				return importSubscription{}, err
 			}
 		}
+		if entry.SiteOverride != "" {
+			if err := validFeedURL(entry.SiteOverride); err != nil {
+				return importSubscription{}, err
+			}
+		}
 		for _, folder := range entry.Folders {
 			if strings.TrimSpace(folder) == "" || !utf8.ValidString(folder) || utf8.RuneCountInString(folder) > 512 || strings.ContainsFunc(folder, unicode.IsControl) || reservedGitFolder(folder) {
 				return importSubscription{}, fmt.Errorf("invalid RSS folder %q", folder)
@@ -179,6 +184,10 @@ func normalizeSubscription(entry roiSource) (importSubscription, error) {
 		source.URL = entry.URL
 	default:
 		return importSubscription{}, fmt.Errorf("source must specify type rss or git")
+	}
+	entry.IconOverride = strings.TrimSpace(entry.IconOverride)
+	if err := validateIconOverride(entry.IconOverride); err != nil {
+		return importSubscription{}, err
 	}
 	if entry.IconURL != "" {
 		if err := validFeedURL(entry.IconURL); err != nil {
@@ -229,12 +238,15 @@ func (s *Store) importFile(r io.Reader, format string) error {
 			enabled = *entry.Enabled
 		}
 		site := entry.SiteURL
+		if entry.SiteOverride != "" {
+			site = entry.SiteOverride
+		}
 		folders := entry.Folders
 		if source.Provider != "" {
 			site = source.URL
 			folders = []string{gitFolder}
 		}
-		result, err := tx.Exec(`INSERT INTO feeds(url,title,site,active,paused,git_provider,git_repo,git_mode,git_preview,icon_url,user_agent,git_tag_filter) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(url) DO NOTHING`, source.URL, entry.Title, site, enabled, entry.Paused && enabled, source.Provider, source.Repo, source.Mode, source.Preview, source.Icon, entry.UserAgent, source.TagFilter)
+		result, err := tx.Exec(`INSERT INTO feeds(url,title,site,active,paused,git_provider,git_repo,git_mode,git_preview,icon_url,user_agent,git_tag_filter,site_override,icon_override,site_auto) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(url) DO NOTHING`, source.URL, entry.Title, site, enabled, entry.Paused && enabled, source.Provider, source.Repo, source.Mode, source.Preview, source.Icon, entry.UserAgent, source.TagFilter, entry.SiteOverride, entry.IconOverride, entry.SiteURL)
 		if err != nil {
 			return err
 		}

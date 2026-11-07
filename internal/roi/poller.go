@@ -22,6 +22,7 @@ import (
 )
 
 type Poller struct {
+	findSiteIcon      func(context.Context, string, string) (string, error)
 	store             *Store
 	config            Config
 	client            *http.Client
@@ -78,6 +79,7 @@ func NewPoller(s *Store, c Config, m *metrics.Set) *Poller {
 		return p.reserveRedirect(req)
 	}}
 	p.client = client
+	p.findSiteIcon = p.fetchSiteIcon
 	p.resources = newParseGate(c.security())
 	return p
 }
@@ -240,10 +242,12 @@ func (p *Poller) fetchReserved(ctx context.Context, id int64, reserved string) {
 	p.cancels[id] = cancel
 	p.mu.Unlock()
 	defer func() { cancel(); p.mu.Lock(); delete(p.cancels, id); p.mu.Unlock() }()
-	var raw, title, etag, modified, userAgent string
+	var raw, title, etag, modified, userAgent, savedSite, siteOverride, iconSite string
+	var iconChecked int64
+	var automatic rssIcon
 	var failures int
 	var git GitSource
-	e := p.store.DB.QueryRowContext(ctx, "SELECT url,title,etag,modified,failures,git_provider,git_repo,git_mode,git_preview,git_revision,icon_url,user_agent,git_tag_filter FROM feeds WHERE id=? AND active=1 AND paused=0", id).Scan(&raw, &title, &etag, &modified, &failures, &git.Provider, &git.Repo, &git.Mode, &git.Preview, &git.Revision, &git.Icon, &userAgent, &git.TagFilter)
+	e := p.store.DB.QueryRowContext(ctx, "SELECT url,title,etag,modified,failures,git_provider,git_repo,git_mode,git_preview,git_revision,icon_url,user_agent,git_tag_filter,site,site_override,icon_site,icon_checked FROM feeds WHERE id=? AND active=1 AND paused=0", id).Scan(&raw, &title, &etag, &modified, &failures, &git.Provider, &git.Repo, &git.Mode, &git.Preview, &git.Revision, &git.Icon, &userAgent, &git.TagFilter, &savedSite, &siteOverride, &iconSite, &iconChecked)
 	if e != nil {
 		return
 	}
@@ -272,10 +276,11 @@ func (p *Poller) fetchReserved(ctx context.Context, id int64, reserved string) {
 		userAgent = defaultUserAgent
 	}
 	req.Header.Set("User-Agent", userAgent)
-	if etag != "" {
+	needsInitialIcon := git.Provider == "" && git.Icon == "" && iconChecked == 0
+	if etag != "" && !needsInitialIcon {
 		req.Header.Set("If-None-Match", etag)
 	}
-	if modified != "" {
+	if modified != "" && !needsInitialIcon {
 		req.Header.Set("If-Modified-Since", modified)
 	}
 	var resp *http.Response
@@ -339,9 +344,25 @@ func (p *Poller) fetchReserved(ctx context.Context, id int64, reserved string) {
 	if ctx.Err() != nil {
 		return
 	}
+	if e == nil && git.Provider == "" {
+		feedBase := raw
+		if resp != nil && resp.Request != nil {
+			feedBase = resp.Request.URL.String()
+		}
+		if parsed != nil {
+			parsed.Link = resolvedIcon(feedBase, parsed.Link)
+		}
+		automatic = p.rssIcon(ctx, parsed, feedBase, savedSite, siteOverride, git.Icon, iconSite, iconChecked, userAgent)
+	}
+	if ctx.Err() != nil {
+		return
+	}
 	if e == nil && parsed != nil {
 		stage = "storage"
 		added, e = p.saveEntriesRevision(ctx, id, parsed, time.Now(), git.Revision)
+	}
+	if ctx.Err() != nil {
+		return
 	}
 	delay := p.config.interval()
 	message := ""
@@ -371,6 +392,11 @@ func (p *Poller) fetchReserved(ctx context.Context, id int64, reserved string) {
 	var revision int64
 	if err = tx.QueryRowContext(ctx, "SELECT active,git_revision FROM feeds WHERE id=?", id).Scan(&active, &revision); err != nil || !active || revision != git.Revision {
 		return
+	}
+	if e == nil && git.Provider == "" {
+		if _, err = tx.ExecContext(ctx, "UPDATE feeds SET icon_url=?,icon_checked=?,icon_site=? WHERE id=?", automatic.URL, automatic.Checked, automatic.Site, id); err != nil {
+			return
+		}
 	}
 	if e == nil {
 		newETag, newModified := etag, modified
@@ -411,7 +437,8 @@ func (p *Poller) saveEntriesRevision(ctx context.Context, id int64, f *gofeed.Fe
 	defer tx.Rollback()
 	var active bool
 	var revision int64
-	if e = tx.QueryRowContext(ctx, "SELECT active,git_revision FROM feeds WHERE id=?", id).Scan(&active, &revision); e == sql.ErrNoRows {
+	var sourceURL string
+	if e = tx.QueryRowContext(ctx, "SELECT active,git_revision,url FROM feeds WHERE id=?", id).Scan(&active, &revision, &sourceURL); e == sql.ErrNoRows {
 		return 0, nil
 	} else if e != nil {
 		return 0, e
@@ -478,7 +505,8 @@ func (p *Poller) saveEntriesRevision(ctx context.Context, id int64, f *gofeed.Fe
 			}
 		}
 	}
-	_, e = tx.ExecContext(ctx, "UPDATE feeds SET title=CASE WHEN title=url AND ?<>'' THEN ? ELSE title END,site=CASE WHEN ?='' THEN site ELSE ? END,last_published=COALESCE((SELECT MAX(published) FROM entries WHERE feed_id=?),0),last_new=CASE WHEN ?>0 THEN ? ELSE last_new END WHERE id=?", f.Title, f.Title, strings.TrimSpace(f.Link), f.Link, id, added, now, id)
+	autoSite := resolvedIcon(sourceURL, f.Link)
+	_, e = tx.ExecContext(ctx, "UPDATE feeds SET title=CASE WHEN title=url AND ?<>'' THEN ? ELSE title END,site_auto=CASE WHEN ?='' THEN site_auto ELSE ? END,site=CASE WHEN site_override<>'' THEN site_override WHEN ?='' THEN site ELSE ? END,last_published=COALESCE((SELECT MAX(published) FROM entries WHERE feed_id=?),0),last_new=CASE WHEN ?>0 THEN ? ELSE last_new END WHERE id=?", f.Title, f.Title, autoSite, autoSite, autoSite, autoSite, id, added, now, id)
 	if e != nil {
 		return 0, e
 	}

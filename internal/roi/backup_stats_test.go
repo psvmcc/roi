@@ -189,7 +189,7 @@ func TestBackupAccountingStorageFailureAndMigration(t *testing.T) {
 	if err := a.backupStatistics(httptest.NewRequest("GET", "/maintenance", nil), &panel); err == nil {
 		t.Fatal("database error hidden")
 	}
-	if _, err := a.store.DB.Exec("DROP TABLE subscription_backup_state; PRAGMA user_version=13"); err != nil {
+	if _, err := a.store.DB.Exec("DROP TABLE subscription_backup_state; ALTER TABLE feeds DROP COLUMN site_override; ALTER TABLE feeds DROP COLUMN icon_override; ALTER TABLE feeds DROP COLUMN icon_checked; ALTER TABLE feeds DROP COLUMN icon_site; ALTER TABLE feeds DROP COLUMN site_auto; PRAGMA user_version=13"); err != nil {
 		t.Fatal(err)
 	}
 	if err := migrate(a.store.DB); err != nil {

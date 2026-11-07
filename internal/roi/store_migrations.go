@@ -11,8 +11,8 @@ func migrate(db *sql.DB) error {
 	if err = db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		return err
 	}
-	if version > 15 {
-		return fmt.Errorf("database schema %d is newer than supported schema 15", version)
+	if version > 19 {
+		return fmt.Errorf("database schema %d is newer than supported schema 19", version)
 	}
 	if version == 0 {
 		tx, e := db.Begin()
@@ -248,6 +248,58 @@ PRAGMA user_version=13;`); e != nil {
 		}
 		defer tx.Rollback()
 		if _, err = tx.Exec(`CREATE TABLE subscription_backup_state(directory TEXT PRIMARY KEY,checked_day TEXT NOT NULL DEFAULT '',created_day TEXT NOT NULL DEFAULT '',last_checked INTEGER NOT NULL DEFAULT 0,last_created INTEGER NOT NULL DEFAULT 0,created INTEGER NOT NULL DEFAULT 0,bytes INTEGER NOT NULL DEFAULT 0,result TEXT NOT NULL DEFAULT '',error TEXT NOT NULL DEFAULT ''); PRAGMA user_version=15;`); err != nil {
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
+	if version < 16 {
+		tx, err := db.Begin()
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		if _, err = tx.Exec("ALTER TABLE feeds ADD COLUMN site_override TEXT NOT NULL DEFAULT ''; PRAGMA user_version=16;"); err != nil {
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
+	if version < 17 {
+		tx, err := db.Begin()
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		if _, err = tx.Exec("ALTER TABLE feeds ADD COLUMN icon_override TEXT NOT NULL DEFAULT ''; PRAGMA user_version=17;"); err != nil {
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
+	if version < 18 {
+		tx, err := db.Begin()
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		if _, err = tx.Exec("ALTER TABLE feeds ADD COLUMN icon_checked INTEGER NOT NULL DEFAULT 0; ALTER TABLE feeds ADD COLUMN icon_site TEXT NOT NULL DEFAULT ''; PRAGMA user_version=18;"); err != nil {
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
+	if version < 19 {
+		tx, err := db.Begin()
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		if _, err = tx.Exec("ALTER TABLE feeds ADD COLUMN site_auto TEXT NOT NULL DEFAULT ''; UPDATE feeds SET site_auto=site WHERE site_override=''; UPDATE feeds SET etag='',modified='',next_fetch=0 WHERE git_provider='' AND site_override<>''; PRAGMA user_version=19;"); err != nil {
 			return err
 		}
 		if err = tx.Commit(); err != nil {

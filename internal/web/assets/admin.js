@@ -91,6 +91,16 @@
       if (number === requestNumber) navigating = false;
     }
   }
+  function fieldCopyValue(button) {
+    return document.getElementById(button.dataset.copyCredential)?.value.trim() || button.dataset.defaultValue || '';
+  }
+  function updateFieldCopyButtons(root) {
+    for (const button of root.querySelectorAll('[data-copy-credential]')) button.disabled = !fieldCopyValue(button);
+  }
+  document.addEventListener('input', event => {
+    const dialog = event.target.closest('dialog');
+    if (dialog) updateFieldCopyButtons(dialog);
+  });
   function legacyCopy(value) {
     const active = document.activeElement;
     const input = document.createElement('textarea');
@@ -242,7 +252,8 @@
   document.addEventListener('click', event => {
     const credentialCopy = event.target.closest('[data-copy-credential]');
     if (credentialCopy) {
-      const value = document.getElementById(credentialCopy.dataset.copyCredential).value;
+      const value = fieldCopyValue(credentialCopy);
+      if (!value) return;
       (async () => {
         try { if (navigator.clipboard?.writeText) { try { await navigator.clipboard.writeText(value); } catch { legacyCopy(value); } } else legacyCopy(value); notify('Copied.'); }
         catch { notify('Unable to copy. Select the value and copy it manually.', true); }
@@ -283,10 +294,21 @@
       const dialog = document.querySelector('#rss-settings-dialog');
       dialog.querySelector('input[name=id]').value = row.dataset.feedId;
       dialog.querySelector('.rss-settings-name').textContent = row.dataset.title;
+      dialog.querySelector('[name=url]').value = row.dataset.repository;
+      dialog.querySelector('[name=site_override]').value = row.dataset.siteOverride;
+      dialog.querySelector('[name=site_override]').placeholder = row.dataset.siteUrl || 'Automatic website URL';
+      dialog.querySelector('[name=icon_override]').value = row.dataset.iconOverride;
+      dialog.querySelector('[name=icon_override]').placeholder = row.dataset.iconUrl || 'Automatic icon';
+      for (const [kind, value] of [['website', row.dataset.siteUrl], ['icon', row.dataset.iconUrl], ['user-agent', dialog.querySelector('[name=user_agent]').placeholder]]) {
+        const button = dialog.querySelector('[data-copy-kind=' + kind + ']');
+        button.dataset.defaultValue = value || '';
+        button.disabled = !value;
+      }
       const input = dialog.querySelector('input[name=user_agent]');
       input.value = row.dataset.userAgent;
+      updateFieldCopyButtons(dialog);
       dialog.showModal();
-      input.focus();
+      dialog.querySelector('[name=url]').focus();
       return;
     }
     const gitAdd = event.target.closest('[data-git-add]');
@@ -315,6 +337,12 @@
       form.querySelector('select[name=mode]').value = row ? row.dataset.gitMode : 'releases';
       form.querySelector('input[name=tag_filter]').value = row?.dataset.gitTagFilter || '';
       form.querySelector('input[name=include_preview]').checked = row?.dataset.gitPreview === 'true';
+      form.querySelector('[name=icon_override]').value = row?.dataset.iconOverride || '';
+      form.querySelector('[name=icon_override]').placeholder = row?.dataset.iconUrl || 'Automatic icon';
+      const iconCopy = form.querySelector('[data-copy-kind=icon]');
+      iconCopy.dataset.defaultValue = row?.dataset.iconUrl || '';
+      iconCopy.disabled = !iconCopy.dataset.defaultValue;
+      updateFieldCopyButtons(dialog);
       updateGitMode();
       dialog.querySelector('h2').textContent = row ? 'Git source settings' : 'Add Git repository';
       dialog.showModal();

@@ -29,7 +29,7 @@ async function freePorts() {
   try {
     source = http.createServer((req, res) => {
       const gitPath = new URL(req.url, 'http://localhost').pathname;
-      if (gitPath === '/') { res.setHeader('Content-Type', 'text/html'); res.end('<html><head><meta name="application-name" content="Forgejo"><link rel="icon" href="/forge-icon.svg"></head></html>'); return; }
+      if (gitPath === '/' || gitPath === '/custom-site') { res.setHeader('Content-Type', 'text/html'); res.end('<html><head><meta name="application-name" content="Forgejo"><link rel="icon" href="/forge-icon.svg"></head></html>'); return; }
       if (/^\/api\/v1\/repos\/team\/(tool|other)\/releases$/.test(gitPath)) {
         res.setHeader('Content-Type', 'application/json');
         res.end(JSON.stringify([
@@ -41,7 +41,7 @@ async function freePorts() {
       if (req.url === '/broken') { res.statusCode = 503; res.end('temporarily unavailable'); return; }
       calls++;
       res.setHeader('Content-Type', 'application/rss+xml');
-      res.end('<rss version="2.0"><channel><title>Local test feed</title><link>https://example.org</link><description>Test</description><item><guid>local-1</guid><pubDate>Wed, 14 Oct 2009 16:12:40 +0000</pubDate><title>Local article</title><description>Article body</description></item></channel></rss>');
+      res.end('<rss version="2.0"><channel><title>Local test feed</title><link>http://' + req.headers.host + '/</link><description>Test</description><item><guid>local-1</guid><pubDate>Wed, 14 Oct 2009 16:12:40 +0000</pubDate><title>Local article</title><description>Article body</description></item></channel></rss>');
     });
     await new Promise(resolve => source.listen(0, '127.0.0.1', resolve));
     const feedURL = `http://127.0.0.1:${source.address().port}/feed`;
@@ -264,13 +264,47 @@ async function freePorts() {
     await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: admin });
     await feedTable.getByRole('button', { name: 'RSS settings', exact: true }).click();
     const rssDialog = page.locator('#rss-settings-dialog');
+    async function assertCopied(button, expected) {
+      await button.click();
+      await page.waitForFunction(async expected => (await navigator.clipboard.readText()) === expected, expected);
+    }
+    await assertCopied(rssDialog.getByRole('button', { name: 'Copy RSS URL', exact: true }), feedURL);
+    await assertCopied(rssDialog.getByRole('button', { name: 'Copy website URL', exact: true }), feedURL.replace('/feed', '/'));
+    await assertCopied(rssDialog.getByRole('button', { name: 'Copy icon URL', exact: true }), feedURL.replace('/feed', '/forge-icon.svg'));
+    const defaultUserAgent = await rssDialog.getByLabel('User-Agent', { exact: true }).getAttribute('placeholder');
+    await assertCopied(rssDialog.getByRole('button', { name: 'Copy User-Agent', exact: true }), defaultUserAgent);
+    for (const row of await rssDialog.locator('.credential-field').all()) assert.equal(await row.locator('button').count(), 1);
+    assert.equal(await rssDialog.getByRole('button', { name: 'Copy website URL', exact: true }).isDisabled(), false);
+    const rssIDBeforeEdit = await feedTable.locator('[data-feed-id]').getAttribute('data-feed-id');
+    assert.equal(await rssDialog.getByLabel('RSS URL', { exact: true }).inputValue(), feedURL);
+    assert.equal(await rssDialog.getByLabel('Icon URL override', { exact: true }).getAttribute('placeholder'), feedURL.replace('/feed', '/forge-icon.svg'));
+    await rssDialog.getByLabel('RSS URL', { exact: true }).fill(feedURL.replace('/feed', '/moved'));
+    await rssDialog.getByLabel('Website URL override', { exact: true }).fill(feedURL.replace('/feed', '/custom-site'));
+    await rssDialog.getByLabel('Icon URL override', { exact: true }).fill('https://icons.example/rss.svg');
     await rssDialog.getByLabel('User-Agent', { exact: true }).fill('BrowserTest/1 ("quoted")');
+    for (const name of ['Copy website URL', 'Copy icon URL', 'Copy User-Agent']) assert.equal(await rssDialog.getByRole('button', { name, exact: true }).isDisabled(), false);
     await action(rssDialog.getByRole('button', { name: 'Save RSS settings', exact: true }), '/rss-settings');
     assert.equal(await rssDialog.isVisible(), false);
+    assert.equal(await feedTable.locator('[data-feed-id]').getAttribute('data-feed-id'), rssIDBeforeEdit);
+    assert.equal(await feedTable.locator('[data-feed-id]').getAttribute('data-repository'), feedURL.replace('/feed', '/moved'));
+    assert.equal(await feedTable.locator('[data-feed-id]').getAttribute('data-site-override'), feedURL.replace('/feed', '/custom-site'));
     assert.equal(await feedTable.locator('[data-feed-id]').getAttribute('data-user-agent'), 'BrowserTest/1 ("quoted")');
     await feedTable.getByRole('button', { name: 'RSS settings', exact: true }).click();
     assert.equal(await rssDialog.getByLabel('User-Agent', { exact: true }).inputValue(), 'BrowserTest/1 ("quoted")');
+    assert.equal(await rssDialog.getByLabel('RSS URL', { exact: true }).inputValue(), feedURL.replace('/feed', '/moved'));
+    assert.equal(await rssDialog.getByLabel('Website URL override', { exact: true }).inputValue(), feedURL.replace('/feed', '/custom-site'));
+    assert.equal(await rssDialog.getByLabel('Icon URL override', { exact: true }).inputValue(), 'https://icons.example/rss.svg');
+    await assertCopied(rssDialog.getByRole('button', { name: 'Copy website URL', exact: true }), feedURL.replace('/feed', '/custom-site'));
+    await assertCopied(rssDialog.getByRole('button', { name: 'Copy icon URL', exact: true }), 'https://icons.example/rss.svg');
+    await assertCopied(rssDialog.getByRole('button', { name: 'Copy User-Agent', exact: true }), 'BrowserTest/1 ("quoted")');
+
+    await rssDialog.getByLabel('Icon URL override', { exact: true }).fill('');
+    await rssDialog.getByLabel('RSS URL', { exact: true }).fill(feedURL);
+    await rssDialog.getByLabel('Website URL override', { exact: true }).fill('');
     await rssDialog.getByLabel('User-Agent', { exact: true }).fill('');
+    await assertCopied(rssDialog.getByRole('button', { name: 'Copy website URL', exact: true }), feedURL.replace('/feed', '/'));
+    await assertCopied(rssDialog.getByRole('button', { name: 'Copy icon URL', exact: true }), feedURL.replace('/feed', '/forge-icon.svg'));
+    await assertCopied(rssDialog.getByRole('button', { name: 'Copy User-Agent', exact: true }), defaultUserAgent);
     await action(rssDialog.getByRole('button', { name: 'Save RSS settings', exact: true }), '/rss-settings');
     assert.equal(await feedTable.locator('[data-feed-id]').getAttribute('data-user-agent'), '');
     const copyURL = feedTable.getByRole('button', { name: 'Copy feed URL', exact: true });
@@ -491,6 +525,7 @@ async function freePorts() {
     assert.equal(await healthyRow.evaluate(node => node.classList.contains('is-paused')), true);
     await page.getByRole('button', { name: 'Add Git repository', exact: true }).click();
     const gitDialog = page.locator('#git-dialog');
+    assert.equal(await gitDialog.getByRole('button', { name: 'Copy icon URL', exact: true }).isDisabled(), true);
     await gitDialog.getByLabel('Repository URL', { exact: true }).fill('https://git.haproxy.org/?p=haproxy-3.4.git;a=summary');
     assert.equal(await gitDialog.getByLabel('Track', { exact: true }).inputValue(), 'tags');
     assert.equal(await gitDialog.locator('option[value=releases]').evaluate(option => option.disabled), true);
@@ -518,18 +553,27 @@ async function freePorts() {
     assert.equal(forbiddenGit.status(), 403);
     await gitRow.getByRole('button', { name: 'Git source settings', exact: true }).click();
     await gitDialog.getByLabel('Include test and preview versions', { exact: true }).check();
+    await gitDialog.getByLabel('Icon URL override', { exact: true }).fill('https://icons.example/git.svg');
+    await assertCopied(gitDialog.getByRole('button', { name: 'Copy repository URL', exact: true }), feedURL.replace('/feed', '/team/tool'));
+    await assertCopied(gitDialog.getByRole('button', { name: 'Copy icon URL', exact: true }), 'https://icons.example/git.svg');
     await action(gitDialog.getByRole('button', { name: 'Save Git source', exact: true }), '/git-source');
     for (let i = 0; i < 50; i++) { gitItems = await get('stream/contents/' + gitSubscription.id); if (gitItems.items.length === 2) break; await sleep(100); }
     assert.equal(gitItems.items.length, 2);
+    assert.equal((await get('subscription/list')).subscriptions.find(sub => sub.id === gitSubscription.id).iconUrl, 'https://icons.example/git.svg');
     await gitRow.getByRole('button', { name: 'Git source settings', exact: true }).click();
     await gitDialog.getByLabel('Include test and preview versions', { exact: true }).uncheck();
+    assert.equal(await gitDialog.getByLabel('Icon URL override', { exact: true }).inputValue(), 'https://icons.example/git.svg');
+    await gitDialog.getByLabel('Icon URL override', { exact: true }).fill('');
+    await assertCopied(gitDialog.getByRole('button', { name: 'Copy icon URL', exact: true }), gitSubscription.iconUrl);
     await gitDialog.getByLabel('Track', { exact: true }).selectOption('tags');
     await gitDialog.getByLabel('Tag filter', { exact: true }).fill('v4.*');
+    await assertCopied(gitDialog.getByRole('button', { name: 'Copy tag filter', exact: true }), 'v4.*');
     await action(gitDialog.getByRole('button', { name: 'Save Git source', exact: true }), '/git-source');
     for (let i = 0; i < 50; i++) { gitItems = await get('stream/contents/' + gitSubscription.id); if (gitItems.items.some(item => item.title === 'v4.0.0')) break; await sleep(100); }
     assert.ok(gitItems.items.some(item => item.title === 'v4.0.0'));
     assert.ok(gitItems.items.every(item => item.title !== 'Tool preview'));
     assert.equal(await gitRow.getAttribute('data-git-tag-filter'), 'v4.*');
+    assert.equal((await get('subscription/list')).subscriptions.find(sub => sub.id === gitSubscription.id).iconUrl, gitSubscription.iconUrl);
     assert.ok(gitItems.items.every(item => item.title.startsWith('v4.')));
     await gitRow.getByRole('button', { name: 'Git source settings', exact: true }).click();
     assert.equal(await gitDialog.getByLabel('Tag filter', { exact: true }).inputValue(), 'v4.*');
