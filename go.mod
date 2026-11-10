@@ -3,7 +3,7 @@ module github.com/psvmcc/roi
 go 1.27.3
 
 require (
-	github.com/VictoriaMetrics/metrics v1.44.1
+	github.com/VictoriaMetrics/metrics v1.45.0
 	github.com/mmcdole/gofeed v1.5.0
 	github.com/urfave/cli/v3 v3.14.0
 	github.com/yuin/goldmark v1.8.7
