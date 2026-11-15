@@ -10,7 +10,7 @@ from unittest import mock
 spec = importlib.util.spec_from_file_location("artifacts", Path(__file__).resolve().parents[1] / "scripts" / "artifacts.py")
 artifacts = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(artifacts)
-INFO = {"GoVersion": "go1.27.3", "Main": {"Path": "github.com/psvmcc/roi", "Version": "v1.0.0"},
+INFO = {"GoVersion": "go1.27.4", "Main": {"Path": "github.com/psvmcc/roi", "Version": "v1.0.0"},
         "Deps": [{"Path": "example.org/library", "Version": "v2.0.0", "Sum": "h1:example"}],
         "Settings": [{"Key": "GOOS", "Value": "linux"}, {"Key": "CGO_ENABLED", "Value": "0"},
                      {"Key": "unrelated", "Value": "not-exported"}]}

@@ -6,7 +6,7 @@ A single-user RSS/Atom aggregator written in Go, with a Google Reader API for [R
 
 ## Quick start
 
-Requirements: Go 1.27.3+ and [just](https://github.com/casey/just).
+Requirements: Go 1.27.4+ and [just](https://github.com/casey/just).
 
 ```sh
 just run
@@ -326,7 +326,7 @@ just check
 just build
 ```
 
-Checks include gofmt, go vet, staticcheck, the race detector, tests without CGO, and govulncheck. The race-enabled suite writes `.coverage/coverage.out` and requires at least 90% total Go statement coverage. Tool versions are pinned in the justfile and CI; module versions and checksums are in `go.mod` and `go.sum`. GitHub Actions tests and builds Linux amd64 and smoke-tests the container. `just lint-actions` validates all workflows with actionlint; CI runs it too. Go 1.27.3 is consistent across `go.mod`, CI, and Dockerfile.
+Checks include gofmt, go vet, staticcheck, the race detector, tests without CGO, and govulncheck. The race-enabled suite writes `.coverage/coverage.out` and requires at least 90% total Go statement coverage. Tool versions are pinned in the justfile and CI; module versions and checksums are in `go.mod` and `go.sum`. GitHub Actions tests and builds Linux amd64 and smoke-tests the container. `just lint-actions` validates all workflows with actionlint; CI runs it too. Go 1.27.4 is consistent across `go.mod`, CI, and Dockerfile.
 
 The final container uses `scratch`: a stripped static binary, root CA certificates, a data directory, and an empty temporary directory. It runs as UID/GID 10001 with no shell or C runtime.
 
