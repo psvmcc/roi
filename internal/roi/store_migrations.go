@@ -11,8 +11,8 @@ func migrate(db *sql.DB) error {
 	if err = db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		return err
 	}
-	if version > 20 {
-		return fmt.Errorf("database schema %d is newer than supported schema 20", version)
+	if version > 21 {
+		return fmt.Errorf("database schema %d is newer than supported schema 21", version)
 	}
 	if version == 0 {
 		tx, e := db.Begin()
@@ -332,5 +332,23 @@ PRAGMA user_version=13;`); e != nil {
 			return err
 		}
 	}
+	if version < 21 {
+		tx, err := db.Begin()
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		if _, err = tx.Exec(`ALTER TABLE feeds ADD COLUMN git_ignore_forks INTEGER NOT NULL DEFAULT 1;
+ ALTER TABLE entries ADD COLUMN git_fork INTEGER NOT NULL DEFAULT 0;
+ DROP TRIGGER entry_stats_insert; DROP TRIGGER entry_stats_delete; DROP TRIGGER entry_stats_update; DROP TRIGGER feed_stats_filter;` + entryStatsTriggers(true) + `
+ UPDATE feeds SET next_fetch=0 WHERE source_kind='git_repos';
+ PRAGMA user_version=21;`); err != nil {
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }

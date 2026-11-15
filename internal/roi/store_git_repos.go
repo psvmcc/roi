@@ -35,7 +35,7 @@ func (s *Store) SaveGitReposSource(id int64, g GitSource, iconOverride *string) 
 		if exists {
 			return clientError("account is already subscribed; edit the existing source")
 		}
-		result, err := tx.Exec(`INSERT INTO feeds(url,title,site,git_provider,git_repo,icon_url,source_kind,git_owner_type,git_owner_id,git_include_subgroups,icon_override) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, checked.URL, checked.title(), checked.URL, checked.Provider, checked.Repo, g.Icon, kindGitRepos, checked.OwnerType, g.OwnerID, checked.IncludeSubgroups, icon)
+		result, err := tx.Exec(`INSERT INTO feeds(url,title,site,git_provider,git_repo,icon_url,source_kind,git_owner_type,git_owner_id,git_include_subgroups,icon_override,git_ignore_forks) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, checked.URL, checked.title(), checked.URL, checked.Provider, checked.Repo, g.Icon, kindGitRepos, checked.OwnerType, g.OwnerID, checked.IncludeSubgroups, icon, g.IgnoreForks)
 		if err != nil {
 			return err
 		}
@@ -44,7 +44,7 @@ func (s *Store) SaveGitReposSource(id int64, g GitSource, iconOverride *string) 
 			return err
 		}
 	} else {
-		result, err := tx.Exec(`UPDATE feeds SET git_include_subgroups=?,icon_override=CASE WHEN ? THEN ? ELSE icon_override END,git_revision=git_revision+1,next_fetch=0,error='',failures=0 WHERE id=? AND source_kind='git_repos' AND url=? AND git_provider=?`, checked.IncludeSubgroups, iconOverride != nil, icon, id, checked.URL, checked.Provider)
+		result, err := tx.Exec(`UPDATE feeds SET git_include_subgroups=?,git_ignore_forks=?,icon_override=CASE WHEN ? THEN ? ELSE icon_override END,git_revision=git_revision+1,next_fetch=0,error='',failures=0 WHERE id=? AND source_kind='git_repos' AND url=? AND git_provider=?`, checked.IncludeSubgroups, g.IgnoreForks, iconOverride != nil, icon, id, checked.URL, checked.Provider)
 		if err != nil {
 			return err
 		}

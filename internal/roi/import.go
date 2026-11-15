@@ -138,6 +138,9 @@ func normalizeSubscription(entry roiSource) (importSubscription, error) {
 		}
 		var err error
 		source, err = parseGitReposSource(entry.URL, entry.Service, entry.OwnerType, entry.IncludeSubgroups)
+		if entry.IgnoreForks != nil {
+			source.IgnoreForks = *entry.IgnoreForks
+		}
 		if err != nil {
 			return importSubscription{}, err
 		}
@@ -145,7 +148,7 @@ func normalizeSubscription(entry roiSource) (importSubscription, error) {
 			return importSubscription{}, fmt.Errorf("repository lists must specify a detected service")
 		}
 	case "git":
-		if entry.OwnerType != "" || entry.IncludeSubgroups {
+		if entry.OwnerType != "" || entry.IncludeSubgroups || entry.IgnoreForks != nil {
 			return importSubscription{}, fmt.Errorf("release sources cannot specify account settings")
 		}
 		if err := validateTagFilter(entry.TagFilter); err != nil {
@@ -172,7 +175,7 @@ func normalizeSubscription(entry roiSource) (importSubscription, error) {
 			return importSubscription{}, err
 		}
 	case "rss":
-		if entry.OwnerType != "" || entry.IncludeSubgroups {
+		if entry.OwnerType != "" || entry.IncludeSubgroups || entry.IgnoreForks != nil {
 			return importSubscription{}, fmt.Errorf("RSS sources cannot specify account settings")
 		}
 		source.Kind = kindRSS
@@ -266,7 +269,7 @@ func (s *Store) importFile(r io.Reader, format string) error {
 			site = source.URL
 			folders = []string{gitFolderFor(source.Kind)}
 		}
-		result, err := tx.Exec(`INSERT INTO feeds(url,title,site,active,paused,git_provider,git_repo,git_mode,git_preview,icon_url,user_agent,git_tag_filter,site_override,icon_override,site_auto,source_kind,git_owner_type,git_include_subgroups) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(url) DO NOTHING`, source.URL, entry.Title, site, enabled, entry.Paused && enabled, source.Provider, source.Repo, source.Mode, source.Preview, source.Icon, entry.UserAgent, source.TagFilter, entry.SiteOverride, entry.IconOverride, entry.SiteURL, source.Kind, source.OwnerType, source.IncludeSubgroups)
+		result, err := tx.Exec(`INSERT INTO feeds(url,title,site,active,paused,git_provider,git_repo,git_mode,git_preview,icon_url,user_agent,git_tag_filter,site_override,icon_override,site_auto,source_kind,git_owner_type,git_include_subgroups,git_ignore_forks) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(url) DO NOTHING`, source.URL, entry.Title, site, enabled, entry.Paused && enabled, source.Provider, source.Repo, source.Mode, source.Preview, source.Icon, entry.UserAgent, source.TagFilter, entry.SiteOverride, entry.IconOverride, entry.SiteURL, source.Kind, source.OwnerType, source.IncludeSubgroups, source.IgnoreForks)
 		if err != nil {
 			return err
 		}

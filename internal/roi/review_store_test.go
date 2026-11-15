@@ -23,7 +23,7 @@ func assertFeedAggregates(t *testing.T, a *App) {
 	}
 	for _, f := range feeds {
 		var count, unread, visible, bytes int64
-		err = a.store.DB.QueryRow(`SELECT COUNT(*),COALESCE(SUM(e.is_read=0),0),COALESCE(SUM(e.is_read=0 AND (f.git_preview=1 OR e.git_preview=0) AND (f.git_tag_filter='' OR substr(e.guid,5) GLOB f.git_tag_filter)),0),COALESCE(SUM(length(CAST(e.title AS BLOB))+length(CAST(e.url AS BLOB))+length(CAST(e.content AS BLOB))+length(CAST(e.author AS BLOB))+length(CAST(e.guid AS BLOB))),0) FROM entries e JOIN feeds f ON f.id=e.feed_id WHERE f.id=?`, f.ID).Scan(&count, &unread, &visible, &bytes)
+		err = a.store.DB.QueryRow(`SELECT COUNT(*),COALESCE(SUM(e.is_read=0),0),COALESCE(SUM(e.is_read=0 AND (f.source_kind<>'git_repos' OR f.git_ignore_forks=0 OR e.git_fork=0) AND (f.git_preview=1 OR e.git_preview=0) AND (f.git_tag_filter='' OR substr(e.guid,5) GLOB f.git_tag_filter)),0),COALESCE(SUM(length(CAST(e.title AS BLOB))+length(CAST(e.url AS BLOB))+length(CAST(e.content AS BLOB))+length(CAST(e.author AS BLOB))+length(CAST(e.guid AS BLOB))),0) FROM entries e JOIN feeds f ON f.id=e.feed_id WHERE f.id=?`, f.ID).Scan(&count, &unread, &visible, &bytes)
 		if err != nil || count != f.Count || unread != f.Unread || visible != f.VisibleUnread || bytes != f.Bytes {
 			t.Fatal(f, count, unread, visible, bytes, err)
 		}

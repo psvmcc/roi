@@ -246,6 +246,7 @@ func TestGitReposMigrationAndReservedFolders(t *testing.T) {
 	rss := addFeed(t, a, "https://example.org/feed")
 	source, _ := parseGitSource("https://github.com/team/project", "github", "releases", false)
 	git := storeGit(t, a, source)
+	rollbackForkMigration(t, a.store.DB)
 	_, err := a.store.DB.Exec(`DROP TRIGGER git_repos_folder_only; DROP TRIGGER git_releases_kind_only;
  ALTER TABLE feeds DROP COLUMN source_kind;
  ALTER TABLE feeds DROP COLUMN git_owner_type;

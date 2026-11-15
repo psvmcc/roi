@@ -32,7 +32,7 @@ async function freePorts() {
       if (gitPath === '/' || gitPath === '/custom-site') { res.setHeader('Content-Type', 'text/html'); res.end('<html><head><meta name="application-name" content="Forgejo"><link rel="icon" href="/forge-icon.svg"></head></html>'); return; }
       if (gitPath === '/api/forgejo/v1/version') { res.end(JSON.stringify({version:'1.0'})); return; }
       if (gitPath === '/api/v1/orgs/team') { res.end(JSON.stringify({id:42,login:'team',html_url:'http://' + req.headers.host + '/team',avatar_url:'http://' + req.headers.host + '/avatar.png'})); return; }
-      if (gitPath === '/api/v1/repos/search') { res.end(JSON.stringify({data:[{id:101,name:'New repository',html_url:'http://' + req.headers.host + '/team/new',description:'Safe <b>text</b>',created_at:'2024-02-03T04:05:06Z',owner:{id:42}}]})); return; }
+      if (gitPath === '/api/v1/repos/search') { res.end(JSON.stringify({data:[{id:101,name:'New repository',html_url:'http://' + req.headers.host + '/team/new',description:'Safe <b>text</b>',created_at:'2024-02-03T04:05:06Z',owner:{id:42}},{id:102,name:'Fork repository',html_url:'http://' + req.headers.host + '/team/fork',description:'A fork',created_at:'2024-01-01T00:00:00Z',fork:true,owner:{id:42}}]})); return; }
       if (/^\/api\/v1\/repos\/team\/(tool|other)\/releases$/.test(gitPath)) {
         res.setHeader('Content-Type', 'application/json');
         res.end(JSON.stringify([
@@ -659,15 +659,17 @@ async function freePorts() {
     await page.waitForFunction(() => [...document.querySelectorAll('#feed-list tr')].some(row => row.textContent.includes('ROI imported RSS') && row.querySelector('button[aria-label="Pause"]')));
     await page.getByRole('button', {name:'Add Git account', exact:true}).click();
     const reposDialog = page.locator('#git-repos-dialog');
+    assert.equal(await reposDialog.getByLabel('Ignore forks', {exact:true}).isChecked(), true);
     await reposDialog.getByLabel('Account URL', {exact:true}).fill(feedURL.replace('/feed','/team'));
     await action(reposDialog.getByRole('button', {name:'Save Git account', exact:true}), '/git-repos');
     const reposTable = page.getByRole('table', {name:'GIT Repos Feeds', exact:true});
-    await page.waitForFunction(() => document.querySelector('#repos-feed-list .counts > span')?.textContent === '1');
+    await page.waitForFunction(() => document.querySelector('#repos-feed-list .counts > span')?.textContent === '2');
     const reposRow = reposTable.locator('[data-feed-id]');
     assert.equal(await reposRow.getAttribute('data-source-kind'), 'git_repos');
     assert.ok((await reposRow.innerText()).includes('GIT_Repos'));
     const reposID = await reposRow.getAttribute('data-feed-id');
     const repoArticles = await get('stream/contents/feed/' + reposID);
+    assert.equal(repoArticles.items.length, 1);
     assert.equal(repoArticles.items[0].title, 'New repository');
     assert.ok(repoArticles.items[0].summary.content.includes('&lt;b&gt;'));
     await reposRow.getByRole('button', {name:'Git account settings', exact:true}).click();
@@ -675,6 +677,18 @@ async function freePorts() {
     await reposDialog.locator('[name=icon_override]').fill(feedURL.replace('/feed','/custom-avatar.png'));
     await action(reposDialog.getByRole('button', {name:'Save Git account', exact:true}), '/git-repos');
     assert.equal(await reposRow.getAttribute('data-icon-override'), feedURL.replace('/feed','/custom-avatar.png'));
+    await reposRow.getByRole('button', {name:'Git account settings', exact:true}).click();
+    assert.equal(await reposDialog.getByLabel('Ignore forks', {exact:true}).isChecked(), true);
+    await reposDialog.getByLabel('Ignore forks', {exact:true}).uncheck();
+    await action(reposDialog.getByRole('button', {name:'Save Git account', exact:true}), '/git-repos');
+    const forkArticles = await get('stream/contents/feed/' + reposID);
+    assert.equal(forkArticles.items.length, 2);
+    assert.ok(forkArticles.items.find(item => item.title === 'Fork repository').summary.content.includes('Forked repository'));
+    await reposRow.getByRole('button', {name:'Git account settings', exact:true}).click();
+    assert.equal(await reposDialog.getByLabel('Ignore forks', {exact:true}).isChecked(), false);
+    await reposDialog.getByLabel('Ignore forks', {exact:true}).check();
+    await action(reposDialog.getByRole('button', {name:'Save Git account', exact:true}), '/git-repos');
+    assert.equal((await get('stream/contents/feed/' + reposID)).items.length, 1);
     await resetFeedAndCheck(reposRow);
     if (process.env.ROI_SCREENSHOT_DIR) {
       fs.mkdirSync(process.env.ROI_SCREENSHOT_DIR, { recursive: true });

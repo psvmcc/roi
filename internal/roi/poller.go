@@ -248,7 +248,7 @@ func (p *Poller) fetchReserved(ctx context.Context, id int64, reserved string) {
 	var automatic rssIcon
 	var failures int
 	var git GitSource
-	e := p.store.DB.QueryRowContext(ctx, "SELECT url,title,etag,modified,failures,git_provider,git_repo,git_mode,git_preview,git_revision,icon_url,user_agent,git_tag_filter,site,site_override,icon_site,icon_checked,source_kind,git_owner_type,git_owner_id,git_include_subgroups FROM feeds WHERE id=? AND active=1 AND paused=0", id).Scan(&raw, &title, &etag, &modified, &failures, &git.Provider, &git.Repo, &git.Mode, &git.Preview, &git.Revision, &git.Icon, &userAgent, &git.TagFilter, &savedSite, &siteOverride, &iconSite, &iconChecked, &git.Kind, &git.OwnerType, &git.OwnerID, &git.IncludeSubgroups)
+	e := p.store.DB.QueryRowContext(ctx, "SELECT url,title,etag,modified,failures,git_provider,git_repo,git_mode,git_preview,git_revision,icon_url,user_agent,git_tag_filter,site,site_override,icon_site,icon_checked,source_kind,git_owner_type,git_owner_id,git_include_subgroups,git_ignore_forks FROM feeds WHERE id=? AND active=1 AND paused=0", id).Scan(&raw, &title, &etag, &modified, &failures, &git.Provider, &git.Repo, &git.Mode, &git.Preview, &git.Revision, &git.Icon, &userAgent, &git.TagFilter, &savedSite, &siteOverride, &iconSite, &iconChecked, &git.Kind, &git.OwnerType, &git.OwnerID, &git.IncludeSubgroups, &git.IgnoreForks)
 	if e != nil {
 		return
 	}
@@ -472,6 +472,7 @@ func (p *Poller) saveEntriesRevision(ctx context.Context, id int64, f *gofeed.Fe
 			guid = fmt.Sprintf("sha256:%x", h)
 		}
 		preview := item.Custom["roi_preview"] == "1"
+		fork := item.Custom["roi_fork"] == "1"
 		content := item.Content
 		if content == "" {
 			content = item.Description
@@ -495,7 +496,7 @@ func (p *Poller) saveEntriesRevision(ctx context.Context, id int64, f *gofeed.Fe
 			return 0, e
 		}
 		if e == sql.ErrNoRows {
-			res, err := tx.ExecContext(ctx, `INSERT INTO entries(feed_id,guid,title,url,content,author,published,received,updated,git_preview) SELECT ?,?,?,?,?,?,?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM tombstones WHERE feed_id=? AND guid IN (?,?))`, id, guid, item.Title, item.Link, content, author, published, received, now, preview, id, guid, tombstoneDigest(guid))
+			res, err := tx.ExecContext(ctx, `INSERT INTO entries(feed_id,guid,title,url,content,author,published,received,updated,git_preview,git_fork) SELECT ?,?,?,?,?,?,?,?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM tombstones WHERE feed_id=? AND guid IN (?,?))`, id, guid, item.Title, item.Link, content, author, published, received, now, preview, fork, id, guid, tombstoneDigest(guid))
 			if err != nil {
 				return 0, err
 			}
@@ -508,7 +509,7 @@ func (p *Poller) saveEntriesRevision(ctx context.Context, id int64, f *gofeed.Fe
 			if !sourceDated {
 				published = oldPublished
 			}
-			_, e = tx.ExecContext(ctx, `UPDATE entries SET title=?,url=?,content=?,author=?,published=?,updated=?,git_preview=? WHERE id=? AND (title<>? OR url<>? OR content<>? OR author<>? OR published<>? OR git_preview<>?)`, item.Title, item.Link, content, author, published, now, preview, oldID, item.Title, item.Link, content, author, published, preview)
+			_, e = tx.ExecContext(ctx, `UPDATE entries SET title=?,url=?,content=?,author=?,published=?,updated=?,git_preview=?,git_fork=? WHERE id=? AND (title<>? OR url<>? OR content<>? OR author<>? OR published<>? OR git_preview<>? OR git_fork<>?)`, item.Title, item.Link, content, author, published, now, preview, fork, oldID, item.Title, item.Link, content, author, published, preview, fork)
 			if e != nil {
 				return 0, e
 			}

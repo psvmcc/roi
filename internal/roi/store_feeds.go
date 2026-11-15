@@ -13,6 +13,7 @@ type Feed struct {
 	Kind, OwnerType                        string
 	OwnerID                                int64
 	IncludeSubgroups, ReposPartial         bool
+	IgnoreForks                            bool
 	Paused                                 bool
 	HostQueued                             bool
 	HostReason                             string
@@ -37,14 +38,14 @@ type Feed struct {
 }
 
 func (s *Store) Feeds() ([]Feed, error) {
-	rows, e := s.DB.Query(`SELECT f.id,f.url,f.title,f.site,f.active,f.paused,f.next_fetch,f.last_attempt,f.last_success,f.last_new,COALESCE((SELECT MAX(published) FROM entries WHERE feed_id=f.id),0),f.error,f.failures,f.git_provider,f.git_repo,f.git_mode,f.git_preview,f.git_revision,CASE WHEN f.icon_override<>'' THEN f.icon_override ELSE f.icon_url END,f.user_agent,f.git_tag_filter,COALESCE(s.count,0),COALESCE(s.unread,0),COALESCE(s.bytes,0),COALESCE(s.visible_unread,0),f.site_override,f.icon_override,f.icon_url,f.site_auto,CASE WHEN f.source_kind='rss' AND f.git_provider<>'' THEN 'git_releases' ELSE f.source_kind END,f.git_owner_type,f.git_owner_id,f.git_include_subgroups,f.repos_partial FROM feeds f LEFT JOIN feed_stats s ON s.feed_id=f.id ORDER BY f.title`)
+	rows, e := s.DB.Query(`SELECT f.id,f.url,f.title,f.site,f.active,f.paused,f.next_fetch,f.last_attempt,f.last_success,f.last_new,COALESCE((SELECT MAX(published) FROM entries WHERE feed_id=f.id),0),f.error,f.failures,f.git_provider,f.git_repo,f.git_mode,f.git_preview,f.git_revision,CASE WHEN f.icon_override<>'' THEN f.icon_override ELSE f.icon_url END,f.user_agent,f.git_tag_filter,COALESCE(s.count,0),COALESCE(s.unread,0),COALESCE(s.bytes,0),COALESCE(s.visible_unread,0),f.site_override,f.icon_override,f.icon_url,f.site_auto,CASE WHEN f.source_kind='rss' AND f.git_provider<>'' THEN 'git_releases' ELSE f.source_kind END,f.git_owner_type,f.git_owner_id,f.git_include_subgroups,f.repos_partial,f.git_ignore_forks FROM feeds f LEFT JOIN feed_stats s ON s.feed_id=f.id ORDER BY f.title`)
 	if e != nil {
 		return nil, e
 	}
 	fs := []Feed{}
 	for rows.Next() {
 		var f Feed
-		if e = rows.Scan(&f.ID, &f.URL, &f.Title, &f.Site, &f.Active, &f.Paused, &f.Next, &f.Attempt, &f.Success, &f.New, &f.Published, &f.Error, &f.Failures, &f.GitProvider, &f.GitRepo, &f.GitMode, &f.GitPreview, &f.GitRevision, &f.Icon, &f.UserAgent, &f.GitTagFilter, &f.Count, &f.Unread, &f.Bytes, &f.VisibleUnread, &f.SiteOverride, &f.IconOverride, &f.AutomaticIcon, &f.AutomaticSite, &f.Kind, &f.OwnerType, &f.OwnerID, &f.IncludeSubgroups, &f.ReposPartial); e != nil {
+		if e = rows.Scan(&f.ID, &f.URL, &f.Title, &f.Site, &f.Active, &f.Paused, &f.Next, &f.Attempt, &f.Success, &f.New, &f.Published, &f.Error, &f.Failures, &f.GitProvider, &f.GitRepo, &f.GitMode, &f.GitPreview, &f.GitRevision, &f.Icon, &f.UserAgent, &f.GitTagFilter, &f.Count, &f.Unread, &f.Bytes, &f.VisibleUnread, &f.SiteOverride, &f.IconOverride, &f.AutomaticIcon, &f.AutomaticSite, &f.Kind, &f.OwnerType, &f.OwnerID, &f.IncludeSubgroups, &f.ReposPartial, &f.IgnoreForks); e != nil {
 			rows.Close()
 			return nil, e
 		}

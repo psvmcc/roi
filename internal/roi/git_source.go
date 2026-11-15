@@ -14,7 +14,7 @@ const kindRSS = "rss"
 const kindGitReleases = "git_releases"
 const kindGitRepos = "git_repos"
 
-const readerEntryFilter = "f.active=1 AND (f.git_preview=1 OR e.git_preview=0) AND (f.git_tag_filter='' OR substr(e.guid,5) GLOB f.git_tag_filter)"
+const readerEntryFilter = "f.active=1 AND (f.source_kind<>'git_repos' OR f.git_ignore_forks=0 OR e.git_fork=0) AND (f.git_preview=1 OR e.git_preview=0) AND (f.git_tag_filter='' OR substr(e.guid,5) GLOB f.git_tag_filter)"
 
 const gitPageSize = 100
 
@@ -26,6 +26,7 @@ type GitSource struct {
 	Kind, OwnerType                 string
 	OwnerID                         int64
 	IncludeSubgroups                bool
+	IgnoreForks                     bool
 	URL, Provider, Repo, Mode, Icon string
 	TagFilter                       string
 	Preview                         bool

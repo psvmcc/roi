@@ -75,6 +75,7 @@ func mustExec(t *testing.T, a *App, q string, args ...any) {
 // reconstructing the historical schema they intend to exercise.
 func rollbackReviewMigration(t *testing.T, db *sql.DB) {
 	t.Helper()
+	rollbackForkMigration(t, db)
 	var version int
 	if err := db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		t.Fatal(err)
@@ -192,4 +193,21 @@ func deviceLoginForm(t *testing.T, a *App) url.Values {
 		t.Fatal(err)
 	}
 	return url.Values{"Email": {c.Login}, "Passwd": {c.Code}}
+}
+
+func rollbackForkMigration(t *testing.T, db *sql.DB) {
+	t.Helper()
+	var version int
+	if err := db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if version < 21 {
+		return
+	}
+	if _, err := db.Exec(`DROP TRIGGER entry_stats_insert; DROP TRIGGER entry_stats_delete; DROP TRIGGER entry_stats_update; DROP TRIGGER feed_stats_filter;` + entryStatsTriggers(false) + `
+ ALTER TABLE entries DROP COLUMN git_fork;
+ ALTER TABLE feeds DROP COLUMN git_ignore_forks;
+ PRAGMA user_version=20;`); err != nil {
+		t.Fatal(err)
+	}
 }

@@ -328,6 +328,7 @@
       provider.value = row?.dataset.gitProvider || 'auto';
       type.value = row?.dataset.ownerType || 'auto';
       provider.disabled = type.disabled = !!row;
+      form.querySelector('[name=ignore_forks]').checked = row ? row.dataset.ignoreForks === 'true' : true;
       const subgroups = form.querySelector('[name=include_subgroups]');
       subgroups.checked = row?.dataset.includeSubgroups === 'true';
       const updateSubgroups = () => {

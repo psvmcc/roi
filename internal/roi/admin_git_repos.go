@@ -39,6 +39,7 @@ func (a *App) adminGitRepos(w http.ResponseWriter, r *http.Request) bool {
 		a.adminStoreError(w, r, clientError(err.Error()))
 		return false
 	}
+	source.IgnoreForks = r.FormValue("ignore_forks") == "1"
 	if id > 0 {
 		source.OwnerID, source.Icon = ownerID, icon
 		a.poller.Cancel(id)

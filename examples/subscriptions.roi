@@ -32,6 +32,7 @@ sources:
     url: https://github.com/nginx
     service: github
     owner_type: organization
+    ignore_forks: true
     title: 'github.com :: nginx'
     enabled: true
     paused: false
@@ -39,6 +40,7 @@ sources:
     url: https://gitlab.com/gitlab-org
     service: gitlab
     owner_type: group
+    ignore_forks: true
     include_subgroups: false
     enabled: true
     paused: false

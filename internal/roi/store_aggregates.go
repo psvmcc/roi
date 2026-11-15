@@ -1,6 +1,9 @@
 package roi
 
-import "database/sql"
+import (
+	"database/sql"
+	"strings"
+)
 
 // Derived counters are updated in the same transaction as article state. This
 // keeps dashboards and Reader metadata independent of the size of the archive.
@@ -23,7 +26,17 @@ UPDATE feed_stats SET tombstones=(SELECT COUNT(*) FROM tombstones WHERE feed_id=
 CREATE TRIGGER tombstone_stats_insert AFTER INSERT ON tombstones BEGIN UPDATE feed_stats SET tombstones=tombstones+1,key_bytes=key_bytes+length(CAST(NEW.guid AS BLOB)) WHERE feed_id=NEW.feed_id; END;
 CREATE TRIGGER tombstone_stats_delete AFTER DELETE ON tombstones BEGIN UPDATE feed_stats SET tombstones=tombstones-1,key_bytes=key_bytes-length(CAST(OLD.guid AS BLOB)) WHERE feed_id=OLD.feed_id; END;
 CREATE TRIGGER feed_stats_insert AFTER INSERT ON feeds BEGIN INSERT INTO feed_stats(feed_id) VALUES(NEW.id); END;
-CREATE TRIGGER entry_stats_insert AFTER INSERT ON entries BEGIN
+` + entryStatsTriggers(false) + `
+PRAGMA user_version=11;`)
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// entryStatsTriggers supports historical databases before fork metadata existed.
+func entryStatsTriggers(forks bool) string {
+	sql := `CREATE TRIGGER entry_stats_insert AFTER INSERT ON entries BEGIN
  UPDATE feed_stats SET count=count+1,unread=unread+(NEW.is_read=0),visible_unread=visible_unread+(NEW.is_read=0 AND EXISTS(SELECT 1 FROM feeds WHERE id=NEW.feed_id AND (git_preview=1 OR NEW.git_preview=0) AND (git_tag_filter='' OR substr(NEW.guid,5) GLOB git_tag_filter))),bytes=bytes+length(CAST(NEW.title AS BLOB))+length(CAST(NEW.url AS BLOB))+length(CAST(NEW.content AS BLOB))+length(CAST(NEW.author AS BLOB))+length(CAST(NEW.guid AS BLOB)) WHERE feed_id=NEW.feed_id;
 END;
 CREATE TRIGGER entry_stats_delete AFTER DELETE ON entries BEGIN
@@ -36,9 +49,15 @@ END;
 CREATE TRIGGER feed_stats_filter AFTER UPDATE OF git_preview,git_tag_filter ON feeds WHEN OLD.git_preview<>NEW.git_preview OR OLD.git_tag_filter<>NEW.git_tag_filter BEGIN
  UPDATE feed_stats SET visible_unread=(SELECT COUNT(*) FROM entries WHERE feed_id=NEW.id AND is_read=0 AND (NEW.git_preview=1 OR git_preview=0) AND (NEW.git_tag_filter='' OR substr(guid,5) GLOB NEW.git_tag_filter)) WHERE feed_id=NEW.id;
 END;
-PRAGMA user_version=11;`)
-	if err != nil {
-		return err
+`
+	if !forks {
+		return sql
 	}
-	return tx.Commit()
+	sql = strings.ReplaceAll(sql, "id=NEW.feed_id AND (git_preview", "id=NEW.feed_id AND (source_kind<>'git_repos' OR git_ignore_forks=0 OR NEW.git_fork=0) AND (git_preview")
+	sql = strings.ReplaceAll(sql, "id=OLD.feed_id AND (git_preview", "id=OLD.feed_id AND (source_kind<>'git_repos' OR git_ignore_forks=0 OR OLD.git_fork=0) AND (git_preview")
+	sql = strings.ReplaceAll(sql, "guid,is_read,git_preview ON entries", "guid,is_read,git_preview,git_fork ON entries")
+	sql = strings.ReplaceAll(sql, "git_preview,git_tag_filter ON feeds", "git_preview,git_tag_filter,git_ignore_forks ON feeds")
+	sql = strings.ReplaceAll(sql, "OLD.git_tag_filter<>NEW.git_tag_filter BEGIN", "OLD.git_tag_filter<>NEW.git_tag_filter OR OLD.git_ignore_forks<>NEW.git_ignore_forks BEGIN")
+	sql = strings.ReplaceAll(sql, "feed_id=NEW.id AND is_read=0 AND", "feed_id=NEW.id AND is_read=0 AND (NEW.source_kind<>'git_repos' OR NEW.git_ignore_forks=0 OR git_fork=0) AND")
+	return sql
 }

@@ -27,23 +27,32 @@ type gitAccount struct {
 	HTMLURL  string `json:"html_url"`
 	WebURL   string `json:"web_url"`
 }
+type gitRepoParent struct {
+	FullName string `json:"full_name"`
+	Path     string `json:"path_with_namespace"`
+	HTMLURL  string `json:"html_url"`
+	WebURL   string `json:"web_url"`
+}
 type gitRepoRecord struct {
-	ID          int64      `json:"id"`
-	Name        string     `json:"name"`
-	Description string     `json:"description"`
-	HTMLURL     string     `json:"html_url"`
-	WebURL      string     `json:"web_url"`
-	Created     string     `json:"created_at"`
-	Private     bool       `json:"private"`
-	Visibility  string     `json:"visibility"`
-	Owner       gitAccount `json:"owner"`
+	Fork        bool           `json:"fork"`
+	Parent      *gitRepoParent `json:"parent"`
+	ForkedFrom  *gitRepoParent `json:"forked_from_project"`
+	ID          int64          `json:"id"`
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	HTMLURL     string         `json:"html_url"`
+	WebURL      string         `json:"web_url"`
+	Created     string         `json:"created_at"`
+	Private     bool           `json:"private"`
+	Visibility  string         `json:"visibility"`
+	Owner       gitAccount     `json:"owner"`
 }
 
 func parseGitReposSource(raw, provider, ownerType string, subgroups bool) (GitSource, error) {
 	if provider == "" {
 		provider = "auto"
 	}
-	s := GitSource{Kind: kindGitRepos, Provider: provider, OwnerType: ownerType, IncludeSubgroups: subgroups}
+	s := GitSource{IgnoreForks: true, Kind: kindGitRepos, Provider: provider, OwnerType: ownerType, IncludeSubgroups: subgroups}
 	if len(raw) > 4096 {
 		return s, clientError("account URL is too long")
 	}
@@ -398,7 +407,13 @@ func (p *Poller) fetchGitRepos(ctx context.Context, s GitSource, id int64) (*gof
 			if description != "" {
 				body = "<p>" + strings.ReplaceAll(html.EscapeString(description), "\n", "<br>") + "</p>"
 			}
-			feed.Items = append(feed.Items, &gofeed.Item{GUID: "gitrepo:" + strconv.FormatInt(repo.ID, 10), Title: repo.Name, Link: link, Description: body, Content: body, PublishedParsed: date, Author: &gofeed.Person{Name: accountName(profile, s.Repo)}})
+			fork, footer := repo.forkFooter()
+			body += footer
+			custom := map[string]string{}
+			if fork {
+				custom["roi_fork"] = "1"
+			}
+			feed.Items = append(feed.Items, &gofeed.Item{Custom: custom, GUID: "gitrepo:" + strconv.FormatInt(repo.ID, 10), Title: repo.Name, Link: link, Description: body, Content: body, PublishedParsed: date, Author: &gofeed.Person{Name: accountName(profile, s.Repo)}})
 			if len(feed.Items) >= gitReposLimit {
 				break
 			}
@@ -412,4 +427,32 @@ func (p *Poller) fetchGitRepos(ctx context.Context, s GitSource, id int64) (*gof
 	}
 	sort.SliceStable(feed.Items, func(i, j int) bool { return feed.Items[i].PublishedParsed.After(*feed.Items[j].PublishedParsed) })
 	return feed, nil
+}
+
+// Fork metadata comes exclusively from the list response; never fetch details.
+func (r gitRepoRecord) forkFooter() (bool, string) {
+	parent := r.Parent
+	if parent == nil {
+		parent = r.ForkedFrom
+	}
+	if !r.Fork && parent == nil {
+		return false, ""
+	}
+	if parent != nil {
+		link := parent.HTMLURL
+		if link == "" {
+			link = parent.WebURL
+		}
+		name := parent.FullName
+		if name == "" {
+			name = parent.Path
+		}
+		if name == "" {
+			name = link
+		}
+		if validFeedURL(link) == nil {
+			return true, `<hr><p>Fork of <a href="` + html.EscapeString(link) + `" rel="noopener noreferrer">` + html.EscapeString(name) + `</a></p>`
+		}
+	}
+	return true, "<hr><p>Forked repository</p>"
 }
