@@ -28,3 +28,17 @@ sources:
     include_preview: false
     enabled: true
     paused: false
+  - type: git_repos
+    url: https://github.com/nginx
+    service: github
+    owner_type: organization
+    title: 'github.com :: nginx'
+    enabled: true
+    paused: false
+  - type: git_repos
+    url: https://gitlab.com/gitlab-org
+    service: gitlab
+    owner_type: group
+    include_subgroups: false
+    enabled: true
+    paused: false

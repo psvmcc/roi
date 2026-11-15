@@ -30,6 +30,9 @@ async function freePorts() {
     source = http.createServer((req, res) => {
       const gitPath = new URL(req.url, 'http://localhost').pathname;
       if (gitPath === '/' || gitPath === '/custom-site') { res.setHeader('Content-Type', 'text/html'); res.end('<html><head><meta name="application-name" content="Forgejo"><link rel="icon" href="/forge-icon.svg"></head></html>'); return; }
+      if (gitPath === '/api/forgejo/v1/version') { res.end(JSON.stringify({version:'1.0'})); return; }
+      if (gitPath === '/api/v1/orgs/team') { res.end(JSON.stringify({id:42,login:'team',html_url:'http://' + req.headers.host + '/team',avatar_url:'http://' + req.headers.host + '/avatar.png'})); return; }
+      if (gitPath === '/api/v1/repos/search') { res.end(JSON.stringify({data:[{id:101,name:'New repository',html_url:'http://' + req.headers.host + '/team/new',description:'Safe <b>text</b>',created_at:'2024-02-03T04:05:06Z',owner:{id:42}}]})); return; }
       if (/^\/api\/v1\/repos\/team\/(tool|other)\/releases$/.test(gitPath)) {
         res.setHeader('Content-Type', 'application/json');
         res.end(JSON.stringify([
@@ -654,6 +657,25 @@ async function freePorts() {
     await resetFeedAndCheck(gitTable.locator('[data-feed-id]').filter({ hasText: '/team/tool' }));
     await resetFeedAndCheck(roiRSSRow);
     await page.waitForFunction(() => [...document.querySelectorAll('#feed-list tr')].some(row => row.textContent.includes('ROI imported RSS') && row.querySelector('button[aria-label="Pause"]')));
+    await page.getByRole('button', {name:'Add Git account', exact:true}).click();
+    const reposDialog = page.locator('#git-repos-dialog');
+    await reposDialog.getByLabel('Account URL', {exact:true}).fill(feedURL.replace('/feed','/team'));
+    await action(reposDialog.getByRole('button', {name:'Save Git account', exact:true}), '/git-repos');
+    const reposTable = page.getByRole('table', {name:'GIT Repos Feeds', exact:true});
+    await page.waitForFunction(() => document.querySelector('#repos-feed-list .counts > span')?.textContent === '1');
+    const reposRow = reposTable.locator('[data-feed-id]');
+    assert.equal(await reposRow.getAttribute('data-source-kind'), 'git_repos');
+    assert.ok((await reposRow.innerText()).includes('GIT_Repos'));
+    const reposID = await reposRow.getAttribute('data-feed-id');
+    const repoArticles = await get('stream/contents/feed/' + reposID);
+    assert.equal(repoArticles.items[0].title, 'New repository');
+    assert.ok(repoArticles.items[0].summary.content.includes('&lt;b&gt;'));
+    await reposRow.getByRole('button', {name:'Git account settings', exact:true}).click();
+    assert.equal(await reposDialog.getByLabel('Account URL', {exact:true}).getAttribute('readonly'), '');
+    await reposDialog.locator('[name=icon_override]').fill(feedURL.replace('/feed','/custom-avatar.png'));
+    await action(reposDialog.getByRole('button', {name:'Save Git account', exact:true}), '/git-repos');
+    assert.equal(await reposRow.getAttribute('data-icon-override'), feedURL.replace('/feed','/custom-avatar.png'));
+    await resetFeedAndCheck(reposRow);
     if (process.env.ROI_SCREENSHOT_DIR) {
       fs.mkdirSync(process.env.ROI_SCREENSHOT_DIR, { recursive: true });
       await page.setViewportSize({ width: 1600, height: 1000 });
@@ -795,7 +817,7 @@ async function freePorts() {
     await revokeAction(page.getByRole('button', { name: 'Revoke browser sessions', exact: true }), '/revoke-browser-sessions');
     await page.waitForURL(admin + '/login');
     assert.deepEqual(errors, []);
-    console.log('Browser integration passed: persistent login/CSRF across server restart, build identity, permanent API sessions/browser revoke text/session columns/browser timezones and fragment localization, import preview/cancel/invalid blocking, RSS/Git reset confirmation/cancel/resync/new IDs/paused resume, themes, async actions without reload, rename/folders, disabled filter, unread, consistent icons/copy URL/clipboard fallback, separate RSS/Git tables, ROI export/import/deduplication, Git releases/tags/preview filtering/Markdown/icons/admin-only folder, device approval/default empty API/device naming, security events/individual revocation/IPs/favicon/delete confirmation, login/logout, OPML deduplication, Reader IDs/dates, token revocation, error counters, disabled polling/API isolation, enable, API unsubscribe, admin-only permanent deletion, mobile layout.');
+    console.log('Browser integration passed: persistent login/CSRF across server restart, build identity, permanent API sessions/browser revoke text/session columns/browser timezones and fragment localization, import preview/cancel/invalid blocking, RSS/Git reset confirmation/cancel/resync/new IDs/paused resume, themes, async actions without reload, rename/folders, disabled filter, unread, consistent icons/copy URL/clipboard fallback, separate RSS/Git releases/Git repos tables, Git account creation/avatar override/safe descriptions/reset, ROI export/import/deduplication, Git releases/tags/preview filtering/Markdown/icons/admin-only folder, device approval/default empty API/device naming, security events/individual revocation/IPs/favicon/delete confirmation, login/logout, OPML deduplication, Reader IDs/dates, token revocation, error counters, disabled polling/API isolation, enable, API unsubscribe, admin-only permanent deletion, mobile layout.');
   } finally {
     if (browser) await browser.close();
     if (app && app.exitCode === null) {

@@ -149,7 +149,7 @@ func TestAutomaticWebsiteMigration(t *testing.T) {
 	manual := addFeed(t, a, "https://example.org/manual")
 	mustExec(t, a, "UPDATE feeds SET site='https://example.org/original',etag='cached',modified='cached',next_fetch=999")
 	mustExec(t, a, "UPDATE feeds SET site='https://custom.example/',site_override='https://custom.example/' WHERE id=?", manual)
-	if _, err := a.store.DB.Exec("ALTER TABLE feeds DROP COLUMN site_auto; PRAGMA user_version=18"); err != nil {
+	if _, err := a.store.DB.Exec("DROP TRIGGER git_repos_folder_only; DROP TRIGGER git_releases_kind_only; ALTER TABLE feeds DROP COLUMN source_kind; ALTER TABLE feeds DROP COLUMN git_owner_type; ALTER TABLE feeds DROP COLUMN git_owner_id; ALTER TABLE feeds DROP COLUMN git_include_subgroups; ALTER TABLE feeds DROP COLUMN repos_partial; ALTER TABLE feeds DROP COLUMN site_auto; PRAGMA user_version=18"); err != nil {
 		t.Fatal(err)
 	}
 	if err := migrate(a.store.DB); err != nil {

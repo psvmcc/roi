@@ -17,22 +17,24 @@ type roiFile struct {
 	Sources []roiSource `yaml:"sources"`
 }
 type roiSource struct {
-	UserAgent      string   `yaml:"user_agent,omitempty"`
-	Type           string   `yaml:"type,omitempty"`
-	URL            string   `yaml:"url,omitempty"`
-	SiteURL        string   `yaml:"site_url,omitempty"`
-	SiteOverride   string   `yaml:"site_url_override,omitempty"`
-	Folders        []string `yaml:"folders,omitempty"`
-	Repository     string   `yaml:"repository,omitempty"`
-	Service        string   `yaml:"service,omitempty"`
-	Title          string   `yaml:"title,omitempty"`
-	Mode           string   `yaml:"mode,omitempty"`
-	TagFilter      string   `yaml:"tag_filter,omitempty"`
-	IncludePreview bool     `yaml:"include_preview,omitempty"`
-	Enabled        *bool    `yaml:"enabled,omitempty"`
-	Paused         bool     `yaml:"paused"`
-	IconURL        string   `yaml:"icon_url,omitempty"`
-	IconOverride   string   `yaml:"icon_url_override,omitempty"`
+	OwnerType        string   `yaml:"owner_type,omitempty"`
+	IncludeSubgroups bool     `yaml:"include_subgroups,omitempty"`
+	UserAgent        string   `yaml:"user_agent,omitempty"`
+	Type             string   `yaml:"type,omitempty"`
+	URL              string   `yaml:"url,omitempty"`
+	SiteURL          string   `yaml:"site_url,omitempty"`
+	SiteOverride     string   `yaml:"site_url_override,omitempty"`
+	Folders          []string `yaml:"folders,omitempty"`
+	Repository       string   `yaml:"repository,omitempty"`
+	Service          string   `yaml:"service,omitempty"`
+	Title            string   `yaml:"title,omitempty"`
+	Mode             string   `yaml:"mode,omitempty"`
+	TagFilter        string   `yaml:"tag_filter,omitempty"`
+	IncludePreview   bool     `yaml:"include_preview,omitempty"`
+	Enabled          *bool    `yaml:"enabled,omitempty"`
+	Paused           bool     `yaml:"paused"`
+	IconURL          string   `yaml:"icon_url,omitempty"`
+	IconOverride     string   `yaml:"icon_url_override,omitempty"`
 }
 
 func (s *Store) ExportROI(w io.Writer) error {
@@ -45,7 +47,7 @@ func (s *Store) exportROI(ctx context.Context, w io.Writer) error {
 		return err
 	}
 	defer tx.Rollback()
-	rows, err := tx.QueryContext(ctx, `SELECT id,url,title,CASE WHEN site_auto<>'' THEN site_auto WHEN site_override='' THEN site ELSE '' END,active,paused,git_provider,git_mode,git_preview,icon_url,user_agent,git_tag_filter,site_override,icon_override FROM feeds ORDER BY url`)
+	rows, err := tx.QueryContext(ctx, `SELECT id,url,title,CASE WHEN site_auto<>'' THEN site_auto WHEN site_override='' THEN site ELSE '' END,active,paused,git_provider,git_mode,git_preview,icon_url,user_agent,git_tag_filter,site_override,icon_override,source_kind,git_owner_type,git_include_subgroups FROM feeds ORDER BY url`)
 	if err != nil {
 		return err
 	}
@@ -53,21 +55,27 @@ func (s *Store) exportROI(ctx context.Context, w io.Writer) error {
 	positions := map[int64]int{}
 	for rows.Next() {
 		var id int64
-		var provider string
+		var provider, kind string
 		var enabled bool
 		var entry roiSource
-		if err = rows.Scan(&id, &entry.URL, &entry.Title, &entry.SiteURL, &enabled, &entry.Paused, &provider, &entry.Mode, &entry.IncludePreview, &entry.IconURL, &entry.UserAgent, &entry.TagFilter, &entry.SiteOverride, &entry.IconOverride); err != nil {
+		if err = rows.Scan(&id, &entry.URL, &entry.Title, &entry.SiteURL, &enabled, &entry.Paused, &provider, &entry.Mode, &entry.IncludePreview, &entry.IconURL, &entry.UserAgent, &entry.TagFilter, &entry.SiteOverride, &entry.IconOverride, &kind, &entry.OwnerType, &entry.IncludeSubgroups); err != nil {
 			rows.Close()
 			return err
 		}
 		entry.Enabled = &enabled
+		if kind != kindGitRepos {
+			entry.OwnerType = ""
+			entry.IncludeSubgroups = false
+		}
 		entry.Type = "rss"
 		if provider == "" {
 			entry.Mode = ""
 			entry.TagFilter = ""
 			entry.IncludePreview = false
 		}
-		if provider != "" {
+		if kind == kindGitRepos {
+			entry.Type, entry.Service, entry.SiteURL, entry.Mode = kindGitRepos, provider, "", ""
+		} else if provider != "" {
 			entry.Type, entry.Repository, entry.Service, entry.URL, entry.SiteURL = "git", entry.URL, provider, "", ""
 		}
 		positions[id] = len(file.Sources)

@@ -82,6 +82,11 @@ func rollbackReviewMigration(t *testing.T, db *sql.DB) {
 	if version < 11 {
 		return
 	}
+	if version >= 20 {
+		if _, err := db.Exec("DROP TRIGGER git_repos_folder_only; DROP TRIGGER git_releases_kind_only; ALTER TABLE feeds DROP COLUMN source_kind; ALTER TABLE feeds DROP COLUMN git_owner_type; ALTER TABLE feeds DROP COLUMN git_owner_id; ALTER TABLE feeds DROP COLUMN git_include_subgroups; ALTER TABLE feeds DROP COLUMN repos_partial"); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if version >= 19 {
 		if _, err := db.Exec("ALTER TABLE feeds DROP COLUMN site_auto"); err != nil {
 			t.Fatal(err)

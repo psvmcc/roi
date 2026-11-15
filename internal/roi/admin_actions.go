@@ -13,6 +13,9 @@ func adminActionMessage(path string) string {
 	if path == "/import-roi" {
 		return "Subscriptions imported. Existing URLs were skipped."
 	}
+	if path == "/git-repos" {
+		return "Git account saved. It will be synced into GIT_Repos."
+	}
 	if path == "/git-source" {
 		return "Git source saved. It will be synced into GIT_Releases."
 	}
@@ -126,6 +129,10 @@ func (a *App) adminAction(w http.ResponseWriter, r *http.Request, cookie *http.C
 			return
 		}
 		a.poller.Wake()
+	case "/git-repos":
+		if !a.adminGitRepos(w, r) {
+			return
+		}
 	case "/git-source":
 		id, err := strconv.ParseInt(r.FormValue("id"), 10, 64)
 		if err != nil || id < 0 {
@@ -147,7 +154,7 @@ func (a *App) adminAction(w http.ResponseWriter, r *http.Request, cookie *http.C
 			provider = "auto"
 		}
 		if id > 0 {
-			err = a.store.DB.QueryRow("SELECT url,git_provider,icon_url FROM feeds WHERE id=? AND git_provider<>''", id).Scan(&raw, &provider, &icon)
+			err = a.store.DB.QueryRow("SELECT url,git_provider,icon_url FROM feeds WHERE id=? AND git_provider<>'' AND source_kind<>'git_repos'", id).Scan(&raw, &provider, &icon)
 			if err != nil {
 				a.adminStoreError(w, r, ErrFeedNotFound)
 				return
@@ -270,7 +277,9 @@ func (a *App) adminAction(w http.ResponseWriter, r *http.Request, cookie *http.C
 			case "rss":
 				query += " AND git_provider=''"
 			case "git":
-				query += " AND git_provider<>''"
+				query += " AND git_provider<>'' AND source_kind<>'git_repos'"
+			case "git_repos":
+				query += " AND source_kind='git_repos'"
 			case "":
 			default:
 				http.Error(w, "invalid feed kind", http.StatusBadRequest)

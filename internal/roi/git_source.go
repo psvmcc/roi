@@ -9,6 +9,10 @@ import (
 )
 
 const gitFolder = "GIT_Releases"
+const gitReposFolder = "GIT_Repos"
+const kindRSS = "rss"
+const kindGitReleases = "git_releases"
+const kindGitRepos = "git_repos"
 
 const readerEntryFilter = "f.active=1 AND (f.git_preview=1 OR e.git_preview=0) AND (f.git_tag_filter='' OR substr(e.guid,5) GLOB f.git_tag_filter)"
 
@@ -19,6 +23,9 @@ const gitMaxPages = 5
 const gitItemLimit = 20
 
 type GitSource struct {
+	Kind, OwnerType                 string
+	OwnerID                         int64
+	IncludeSubgroups                bool
 	URL, Provider, Repo, Mode, Icon string
 	TagFilter                       string
 	Preview                         bool
@@ -26,7 +33,7 @@ type GitSource struct {
 }
 
 func reservedGitFolder(name string) bool {
-	return name == gitFolder || strings.HasPrefix(name, gitFolder+"/")
+	return name == gitFolder || strings.HasPrefix(name, gitFolder+"/") || name == gitReposFolder || strings.HasPrefix(name, gitReposFolder+"/")
 }
 
 func parseGitSource(raw, provider, mode string, preview bool) (GitSource, error) {

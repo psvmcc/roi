@@ -610,7 +610,7 @@ func (a *App) subscription(w http.ResponseWriter, r *http.Request, route string)
 	for _, op := range []string{"a", "r"} {
 		for _, tag := range r.Form[op] {
 			if i := strings.Index(tag, "/label/"); i >= 0 && reservedGitFolder(tag[i+7:]) {
-				return &statusError{http.StatusForbidden, "GIT_Releases is managed only in the admin"}
+				return &statusError{http.StatusForbidden, "Git folders (GIT_Releases and GIT_Repos) are managed only in the admin"}
 			}
 		}
 	}

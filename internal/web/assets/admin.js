@@ -311,6 +311,40 @@
       dialog.querySelector('[name=url]').focus();
       return;
     }
+    const reposAdd = event.target.closest('[data-repos-add]');
+    const reposEdit = event.target.closest('[data-repos-edit]');
+    if (reposAdd || reposEdit) {
+      event.preventDefault();
+      const row = reposEdit?.closest('[data-feed-id]');
+      const dialog = document.querySelector('#git-repos-dialog');
+      const form = dialog.querySelector('form');
+      form.reset();
+      form.querySelector('[name=id]').value = row?.dataset.feedId || '0';
+      const input = form.querySelector('[name=account]');
+      input.value = row?.dataset.repository || '';
+      input.readOnly = !!row;
+      const provider = form.querySelector('[name=provider]');
+      const type = form.querySelector('[name=owner_type]');
+      provider.value = row?.dataset.gitProvider || 'auto';
+      type.value = row?.dataset.ownerType || 'auto';
+      provider.disabled = type.disabled = !!row;
+      const subgroups = form.querySelector('[name=include_subgroups]');
+      subgroups.checked = row?.dataset.includeSubgroups === 'true';
+      const updateSubgroups = () => {
+        subgroups.disabled = !['auto', 'gitlab'].includes(provider.value) || !['auto', 'group'].includes(type.value);
+        if (subgroups.disabled) subgroups.checked = false;
+      };
+      provider.onchange = type.onchange = updateSubgroups;
+      updateSubgroups();
+      form.querySelector('[name=icon_override]').value = row?.dataset.iconOverride || '';
+      form.querySelector('[name=icon_override]').placeholder = row?.dataset.iconUrl || 'Account avatar';
+      form.querySelector('[data-copy-kind=icon]').dataset.defaultValue = row?.dataset.iconUrl || '';
+      updateFieldCopyButtons(dialog);
+      dialog.querySelector('h2').textContent = row ? 'Git account settings' : 'Add Git account';
+      dialog.showModal();
+      if (!row) input.focus();
+      return;
+    }
     const gitAdd = event.target.closest('[data-git-add]');
     const gitEdit = event.target.closest('[data-git-edit]');
     if (gitAdd || gitEdit) {

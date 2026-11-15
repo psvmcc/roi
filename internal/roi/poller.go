@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -247,7 +248,7 @@ func (p *Poller) fetchReserved(ctx context.Context, id int64, reserved string) {
 	var automatic rssIcon
 	var failures int
 	var git GitSource
-	e := p.store.DB.QueryRowContext(ctx, "SELECT url,title,etag,modified,failures,git_provider,git_repo,git_mode,git_preview,git_revision,icon_url,user_agent,git_tag_filter,site,site_override,icon_site,icon_checked FROM feeds WHERE id=? AND active=1 AND paused=0", id).Scan(&raw, &title, &etag, &modified, &failures, &git.Provider, &git.Repo, &git.Mode, &git.Preview, &git.Revision, &git.Icon, &userAgent, &git.TagFilter, &savedSite, &siteOverride, &iconSite, &iconChecked)
+	e := p.store.DB.QueryRowContext(ctx, "SELECT url,title,etag,modified,failures,git_provider,git_repo,git_mode,git_preview,git_revision,icon_url,user_agent,git_tag_filter,site,site_override,icon_site,icon_checked,source_kind,git_owner_type,git_owner_id,git_include_subgroups FROM feeds WHERE id=? AND active=1 AND paused=0", id).Scan(&raw, &title, &etag, &modified, &failures, &git.Provider, &git.Repo, &git.Mode, &git.Preview, &git.Revision, &git.Icon, &userAgent, &git.TagFilter, &savedSite, &siteOverride, &iconSite, &iconChecked, &git.Kind, &git.OwnerType, &git.OwnerID, &git.IncludeSubgroups)
 	if e != nil {
 		return
 	}
@@ -291,7 +292,11 @@ func (p *Poller) fetchReserved(ctx context.Context, id int64, reserved string) {
 	if git.Provider != "" {
 		git.URL = raw
 		stage = "parse"
-		parsed, e = p.fetchGit(ctx, git, id)
+		if git.Kind == kindGitRepos {
+			parsed, e = p.fetchGitRepos(ctx, git, id)
+		} else {
+			parsed, e = p.fetchGit(ctx, git, id)
+		}
 		status = 200
 		var ge *gitHTTPError
 		if errors.As(e, &ge) {
@@ -392,6 +397,15 @@ func (p *Poller) fetchReserved(ctx context.Context, id int64, reserved string) {
 	var revision int64
 	if err = tx.QueryRowContext(ctx, "SELECT active,git_revision FROM feeds WHERE id=?", id).Scan(&active, &revision); err != nil || !active || revision != git.Revision {
 		return
+	}
+	if e == nil && git.Kind == kindGitRepos && parsed != nil {
+		ownerID, parseErr := strconv.ParseInt(parsed.Custom["roi_owner_id"], 10, 64)
+		if parseErr != nil {
+			return
+		}
+		if _, err = tx.ExecContext(ctx, "UPDATE feeds SET icon_url=?,git_owner_type=?,git_owner_id=?,repos_partial=? WHERE id=?", parsed.Custom["roi_owner_avatar"], parsed.Custom["roi_owner_type"], ownerID, parsed.Custom["roi_repos_partial"] == "1", id); err != nil {
+			return
+		}
 	}
 	if e == nil && git.Provider == "" {
 		if _, err = tx.ExecContext(ctx, "UPDATE feeds SET icon_url=?,icon_checked=?,icon_site=? WHERE id=?", automatic.URL, automatic.Checked, automatic.Site, id); err != nil {

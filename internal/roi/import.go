@@ -132,7 +132,22 @@ func decodeSubscriptions(r io.Reader, format string) ([]roiSource, error) {
 func normalizeSubscription(entry roiSource) (importSubscription, error) {
 	var source GitSource
 	switch entry.Type {
+	case "git_repos":
+		if entry.Repository != "" || entry.SiteURL != "" || entry.SiteOverride != "" || len(entry.Folders) != 0 || entry.UserAgent != "" || entry.Mode != "" || entry.TagFilter != "" || entry.IncludePreview {
+			return importSubscription{}, fmt.Errorf("repository lists cannot specify RSS or release settings")
+		}
+		var err error
+		source, err = parseGitReposSource(entry.URL, entry.Service, entry.OwnerType, entry.IncludeSubgroups)
+		if err != nil {
+			return importSubscription{}, err
+		}
+		if source.Provider == "auto" {
+			return importSubscription{}, fmt.Errorf("repository lists must specify a detected service")
+		}
 	case "git":
+		if entry.OwnerType != "" || entry.IncludeSubgroups {
+			return importSubscription{}, fmt.Errorf("release sources cannot specify account settings")
+		}
 		if err := validateTagFilter(entry.TagFilter); err != nil {
 			return importSubscription{}, err
 		}
@@ -151,11 +166,16 @@ func normalizeSubscription(entry roiSource) (importSubscription, error) {
 		}
 		var err error
 		source, err = parseGitSource(entry.Repository, entry.Service, mode, entry.IncludePreview)
+		source.Kind = kindGitReleases
 		source.TagFilter = entry.TagFilter
 		if err != nil {
 			return importSubscription{}, err
 		}
 	case "rss":
+		if entry.OwnerType != "" || entry.IncludeSubgroups {
+			return importSubscription{}, fmt.Errorf("RSS sources cannot specify account settings")
+		}
+		source.Kind = kindRSS
 		if err := validateUserAgent(entry.UserAgent); err != nil {
 			return importSubscription{}, err
 		}
@@ -183,7 +203,7 @@ func normalizeSubscription(entry roiSource) (importSubscription, error) {
 		}
 		source.URL = entry.URL
 	default:
-		return importSubscription{}, fmt.Errorf("source must specify type rss or git")
+		return importSubscription{}, fmt.Errorf("source must specify type rss, git or git_repos")
 	}
 	entry.IconOverride = strings.TrimSpace(entry.IconOverride)
 	if err := validateIconOverride(entry.IconOverride); err != nil {
@@ -244,9 +264,9 @@ func (s *Store) importFile(r io.Reader, format string) error {
 		folders := entry.Folders
 		if source.Provider != "" {
 			site = source.URL
-			folders = []string{gitFolder}
+			folders = []string{gitFolderFor(source.Kind)}
 		}
-		result, err := tx.Exec(`INSERT INTO feeds(url,title,site,active,paused,git_provider,git_repo,git_mode,git_preview,icon_url,user_agent,git_tag_filter,site_override,icon_override,site_auto) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(url) DO NOTHING`, source.URL, entry.Title, site, enabled, entry.Paused && enabled, source.Provider, source.Repo, source.Mode, source.Preview, source.Icon, entry.UserAgent, source.TagFilter, entry.SiteOverride, entry.IconOverride, entry.SiteURL)
+		result, err := tx.Exec(`INSERT INTO feeds(url,title,site,active,paused,git_provider,git_repo,git_mode,git_preview,icon_url,user_agent,git_tag_filter,site_override,icon_override,site_auto,source_kind,git_owner_type,git_include_subgroups) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(url) DO NOTHING`, source.URL, entry.Title, site, enabled, entry.Paused && enabled, source.Provider, source.Repo, source.Mode, source.Preview, source.Icon, entry.UserAgent, source.TagFilter, entry.SiteOverride, entry.IconOverride, entry.SiteURL, source.Kind, source.OwnerType, source.IncludeSubgroups)
 		if err != nil {
 			return err
 		}

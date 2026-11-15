@@ -10,6 +10,9 @@ import (
 )
 
 type Feed struct {
+	Kind, OwnerType                        string
+	OwnerID                                int64
+	IncludeSubgroups, ReposPartial         bool
 	Paused                                 bool
 	HostQueued                             bool
 	HostReason                             string
@@ -34,14 +37,14 @@ type Feed struct {
 }
 
 func (s *Store) Feeds() ([]Feed, error) {
-	rows, e := s.DB.Query(`SELECT f.id,f.url,f.title,f.site,f.active,f.paused,f.next_fetch,f.last_attempt,f.last_success,f.last_new,COALESCE((SELECT MAX(published) FROM entries WHERE feed_id=f.id),0),f.error,f.failures,f.git_provider,f.git_repo,f.git_mode,f.git_preview,f.git_revision,CASE WHEN f.icon_override<>'' THEN f.icon_override ELSE f.icon_url END,f.user_agent,f.git_tag_filter,COALESCE(s.count,0),COALESCE(s.unread,0),COALESCE(s.bytes,0),COALESCE(s.visible_unread,0),f.site_override,f.icon_override,f.icon_url,f.site_auto FROM feeds f LEFT JOIN feed_stats s ON s.feed_id=f.id ORDER BY f.title`)
+	rows, e := s.DB.Query(`SELECT f.id,f.url,f.title,f.site,f.active,f.paused,f.next_fetch,f.last_attempt,f.last_success,f.last_new,COALESCE((SELECT MAX(published) FROM entries WHERE feed_id=f.id),0),f.error,f.failures,f.git_provider,f.git_repo,f.git_mode,f.git_preview,f.git_revision,CASE WHEN f.icon_override<>'' THEN f.icon_override ELSE f.icon_url END,f.user_agent,f.git_tag_filter,COALESCE(s.count,0),COALESCE(s.unread,0),COALESCE(s.bytes,0),COALESCE(s.visible_unread,0),f.site_override,f.icon_override,f.icon_url,f.site_auto,CASE WHEN f.source_kind='rss' AND f.git_provider<>'' THEN 'git_releases' ELSE f.source_kind END,f.git_owner_type,f.git_owner_id,f.git_include_subgroups,f.repos_partial FROM feeds f LEFT JOIN feed_stats s ON s.feed_id=f.id ORDER BY f.title`)
 	if e != nil {
 		return nil, e
 	}
 	fs := []Feed{}
 	for rows.Next() {
 		var f Feed
-		if e = rows.Scan(&f.ID, &f.URL, &f.Title, &f.Site, &f.Active, &f.Paused, &f.Next, &f.Attempt, &f.Success, &f.New, &f.Published, &f.Error, &f.Failures, &f.GitProvider, &f.GitRepo, &f.GitMode, &f.GitPreview, &f.GitRevision, &f.Icon, &f.UserAgent, &f.GitTagFilter, &f.Count, &f.Unread, &f.Bytes, &f.VisibleUnread, &f.SiteOverride, &f.IconOverride, &f.AutomaticIcon, &f.AutomaticSite); e != nil {
+		if e = rows.Scan(&f.ID, &f.URL, &f.Title, &f.Site, &f.Active, &f.Paused, &f.Next, &f.Attempt, &f.Success, &f.New, &f.Published, &f.Error, &f.Failures, &f.GitProvider, &f.GitRepo, &f.GitMode, &f.GitPreview, &f.GitRevision, &f.Icon, &f.UserAgent, &f.GitTagFilter, &f.Count, &f.Unread, &f.Bytes, &f.VisibleUnread, &f.SiteOverride, &f.IconOverride, &f.AutomaticIcon, &f.AutomaticSite, &f.Kind, &f.OwnerType, &f.OwnerID, &f.IncludeSubgroups, &f.ReposPartial); e != nil {
 			rows.Close()
 			return nil, e
 		}
@@ -191,7 +194,7 @@ func (s *Store) SaveGitSource(id int64, g GitSource, iconOverride ...string) err
 		if exists != 0 {
 			return clientError("repository is already subscribed; edit the existing source")
 		}
-		result, err := tx.Exec("INSERT INTO feeds(url,title,site,git_provider,git_repo,git_mode,git_preview,icon_url,git_tag_filter,icon_override) VALUES(?,?,?,?,?,?,?,?,?,?)", g.URL, g.title(), g.URL, g.Provider, g.Repo, g.Mode, g.Preview, g.Icon, g.TagFilter, override)
+		result, err := tx.Exec("INSERT INTO feeds(url,title,site,git_provider,git_repo,git_mode,git_preview,icon_url,git_tag_filter,icon_override,source_kind) VALUES(?,?,?,?,?,?,?,?,?,?,?)", g.URL, g.title(), g.URL, g.Provider, g.Repo, g.Mode, g.Preview, g.Icon, g.TagFilter, override, kindGitReleases)
 		if err != nil {
 			return err
 		}
@@ -200,7 +203,7 @@ func (s *Store) SaveGitSource(id int64, g GitSource, iconOverride ...string) err
 			return err
 		}
 	} else {
-		result, err := tx.Exec("UPDATE feeds SET git_mode=?,git_preview=?,git_tag_filter=?,icon_override=CASE WHEN ? THEN ? ELSE icon_override END,git_revision=git_revision+1,next_fetch=0,error='',failures=0 WHERE id=? AND url=? AND git_provider=?", g.Mode, g.Preview, g.TagFilter, len(iconOverride) > 0, override, id, g.URL, g.Provider)
+		result, err := tx.Exec("UPDATE feeds SET git_mode=?,git_preview=?,git_tag_filter=?,icon_override=CASE WHEN ? THEN ? ELSE icon_override END,git_revision=git_revision+1,next_fetch=0,error='',failures=0 WHERE id=? AND url=? AND git_provider=? AND source_kind<>'git_repos'", g.Mode, g.Preview, g.TagFilter, len(iconOverride) > 0, override, id, g.URL, g.Provider)
 		if err != nil {
 			return err
 		}

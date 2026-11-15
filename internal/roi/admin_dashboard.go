@@ -29,6 +29,7 @@ type feedPanel struct {
 	CSRF, ID, ScrollID, Label string
 	Feeds                     []Feed
 	DisabledOnly, IsGit       bool
+	IsRepos                   bool
 	DisabledFeeds             int64
 }
 
@@ -52,7 +53,7 @@ type dashboard struct {
 	APIDevices                                                   []APIDevice
 	CSRF                                                         string
 	Feeds                                                        []Feed
-	RSSPanel, GitPanel                                           feedPanel
+	RSSPanel, GitPanel, ReposPanel                               feedPanel
 	Logs                                                         []fetchLog
 	DataBytes, DBBytes, WALBytes, Entries, LastRotation, Deleted int64
 	Unread, EnabledFeeds, DisabledFeeds, DisabledUnread          int64
@@ -91,6 +92,7 @@ func (a *App) adminDashboard(w http.ResponseWriter, r *http.Request, cookie *htt
 	}
 	d.RSSPanel = feedPanel{CSRF: csrf, ID: "feed-list", ScrollID: "feed-scroll", Label: "RSS Feeds", DisabledOnly: d.DisabledOnly}
 	d.GitPanel = feedPanel{CSRF: csrf, ID: "git-feed-list", ScrollID: "git-feed-scroll", Label: "GIT Releases Feeds", DisabledOnly: d.DisabledOnly, IsGit: true}
+	d.ReposPanel = feedPanel{CSRF: csrf, ID: "repos-feed-list", ScrollID: "repos-feed-scroll", Label: "GIT Repos Feeds", DisabledOnly: d.DisabledOnly, IsGit: true, IsRepos: true}
 	d.ReaderSessions = sessionPanel{CSRF: csrf, ScrollID: "reader-session-scroll", Label: "Reader API sessions"}
 	d.BrowserSessions = sessionPanel{CSRF: csrf, ScrollID: "browser-session-scroll", Label: "Browser sessions", ShowExpiry: true}
 	if d.Page == "devices" || d.Page == "security" {
@@ -132,7 +134,9 @@ func (a *App) adminDashboard(w http.ResponseWriter, r *http.Request, cookie *htt
 				f.Unread = f.VisibleUnread
 			} else {
 				d.DisabledFeeds++
-				if f.GitProvider == "" {
+				if f.Kind == kindGitRepos {
+					d.ReposPanel.DisabledFeeds++
+				} else if f.GitProvider == "" {
 					d.RSSPanel.DisabledFeeds++
 				} else {
 					d.GitPanel.DisabledFeeds++
@@ -158,7 +162,9 @@ func (a *App) adminDashboard(w http.ResponseWriter, r *http.Request, cookie *htt
 			return strings.ToLower(x.Title) < strings.ToLower(y.Title)
 		})
 		for _, f := range d.Feeds {
-			if f.GitProvider == "" {
+			if f.Kind == kindGitRepos {
+				d.ReposPanel.Feeds = append(d.ReposPanel.Feeds, f)
+			} else if f.GitProvider == "" {
 				d.RSSPanel.Feeds = append(d.RSSPanel.Feeds, f)
 			} else {
 				d.GitPanel.Feeds = append(d.GitPanel.Feeds, f)

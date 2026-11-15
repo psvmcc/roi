@@ -11,8 +11,8 @@ func migrate(db *sql.DB) error {
 	if err = db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		return err
 	}
-	if version > 19 {
-		return fmt.Errorf("database schema %d is newer than supported schema 19", version)
+	if version > 20 {
+		return fmt.Errorf("database schema %d is newer than supported schema 20", version)
 	}
 	if version == 0 {
 		tx, e := db.Begin()
@@ -300,6 +300,32 @@ PRAGMA user_version=13;`); e != nil {
 		}
 		defer tx.Rollback()
 		if _, err = tx.Exec("ALTER TABLE feeds ADD COLUMN site_auto TEXT NOT NULL DEFAULT ''; UPDATE feeds SET site_auto=site WHERE site_override=''; UPDATE feeds SET etag='',modified='',next_fetch=0 WHERE git_provider='' AND site_override<>''; PRAGMA user_version=19;"); err != nil {
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
+	if version < 20 {
+		tx, err := db.Begin()
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		if _, err = tx.Exec(`ALTER TABLE feeds ADD COLUMN source_kind TEXT NOT NULL DEFAULT 'rss';
+ ALTER TABLE feeds ADD COLUMN git_owner_type TEXT NOT NULL DEFAULT 'auto';
+ ALTER TABLE feeds ADD COLUMN git_owner_id INTEGER NOT NULL DEFAULT 0;
+ ALTER TABLE feeds ADD COLUMN git_include_subgroups INTEGER NOT NULL DEFAULT 0;
+ ALTER TABLE feeds ADD COLUMN repos_partial INTEGER NOT NULL DEFAULT 0;
+ UPDATE feeds SET source_kind='git_releases' WHERE git_provider<>'';
+ -- Preserve pre-existing RSS folders before reserving their old names.
+ INSERT OR IGNORE INTO folders(name) SELECT 'RSS/'||name FROM folders WHERE name='GIT_Repos' OR name GLOB 'GIT_Repos/*';
+ INSERT OR IGNORE INTO feed_folders(feed_id,name) SELECT feed_id,'RSS/'||name FROM feed_folders WHERE name='GIT_Repos' OR name GLOB 'GIT_Repos/*';
+ DELETE FROM feed_folders WHERE name='GIT_Repos' OR name GLOB 'GIT_Repos/*';
+ DELETE FROM folders WHERE name='GIT_Repos' OR name GLOB 'GIT_Repos/*';
+ CREATE TRIGGER git_repos_folder_only BEFORE INSERT ON feed_folders WHEN (NEW.name='GIT_Repos' OR NEW.name GLOB 'GIT_Repos/*') AND (SELECT source_kind FROM feeds WHERE id=NEW.feed_id)<>'git_repos' BEGIN SELECT RAISE(ABORT,'GIT_Repos accepts only Git repository-list sources'); END;
+ CREATE TRIGGER git_releases_kind_only BEFORE INSERT ON feed_folders WHEN (NEW.name='GIT_Releases' OR NEW.name GLOB 'GIT_Releases/*') AND (SELECT source_kind FROM feeds WHERE id=NEW.feed_id)='git_repos' BEGIN SELECT RAISE(ABORT,'repository lists belong to GIT_Repos'); END;
+ PRAGMA user_version=20;`); err != nil {
 			return err
 		}
 		if err = tx.Commit(); err != nil {
