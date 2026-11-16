@@ -107,6 +107,7 @@ func (p *Poller) detectGit(ctx context.Context, s GitSource) (GitSource, error) 
 	}
 	validated.Icon = s.Icon
 	validated.TagFilter = s.TagFilter
+	validated.TagFilterMode = s.TagFilterMode
 	if validated.Provider == "gitweb" {
 		budget := gitBudget{Limit: p.config.Poll.MaxBytes}
 		b, err := p.gitGet(ctx, validated.gitwebURL("tags", ""), "", &budget)

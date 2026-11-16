@@ -163,7 +163,8 @@ func (a *App) adminAction(w http.ResponseWriter, r *http.Request, cookie *http.C
 		source, err := parseGitSource(raw, provider, r.FormValue("mode"), r.FormValue("include_preview") == "1")
 		if err == nil {
 			source.TagFilter = strings.TrimSpace(r.FormValue("tag_filter"))
-			err = validateTagFilter(source.TagFilter)
+			source.TagFilterMode = tagFilterMode([]string{r.FormValue("tag_filter_mode")})
+			err = validateTagFilter(source.TagFilter, source.TagFilterMode)
 		}
 		if err == nil && id == 0 {
 			source, err = a.poller.detectGit(r.Context(), source)

@@ -133,7 +133,7 @@ func normalizeSubscription(entry roiSource) (importSubscription, error) {
 	var source GitSource
 	switch entry.Type {
 	case "git_repos":
-		if entry.Repository != "" || entry.SiteURL != "" || entry.SiteOverride != "" || len(entry.Folders) != 0 || entry.UserAgent != "" || entry.Mode != "" || entry.TagFilter != "" || entry.IncludePreview {
+		if entry.Repository != "" || entry.SiteURL != "" || entry.SiteOverride != "" || len(entry.Folders) != 0 || entry.UserAgent != "" || entry.Mode != "" || entry.TagFilter != "" || entry.TagFilterMode != "" || entry.IncludePreview {
 			return importSubscription{}, fmt.Errorf("repository lists cannot specify RSS or release settings")
 		}
 		var err error
@@ -151,7 +151,7 @@ func normalizeSubscription(entry roiSource) (importSubscription, error) {
 		if entry.OwnerType != "" || entry.IncludeSubgroups || entry.IgnoreForks != nil {
 			return importSubscription{}, fmt.Errorf("release sources cannot specify account settings")
 		}
-		if err := validateTagFilter(entry.TagFilter); err != nil {
+		if err := validateTagFilter(entry.TagFilter, entry.TagFilterMode); err != nil {
 			return importSubscription{}, err
 		}
 		if entry.URL != "" || entry.SiteURL != "" || entry.SiteOverride != "" || len(entry.Folders) != 0 || entry.UserAgent != "" {
@@ -171,6 +171,7 @@ func normalizeSubscription(entry roiSource) (importSubscription, error) {
 		source, err = parseGitSource(entry.Repository, entry.Service, mode, entry.IncludePreview)
 		source.Kind = kindGitReleases
 		source.TagFilter = entry.TagFilter
+		source.TagFilterMode = tagFilterMode([]string{entry.TagFilterMode})
 		if err != nil {
 			return importSubscription{}, err
 		}
@@ -183,7 +184,7 @@ func normalizeSubscription(entry roiSource) (importSubscription, error) {
 			return importSubscription{}, err
 		}
 		entry.UserAgent = strings.TrimSpace(entry.UserAgent)
-		if entry.Repository != "" || entry.Service != "" || entry.Mode != "" || entry.IncludePreview || entry.TagFilter != "" {
+		if entry.Repository != "" || entry.Service != "" || entry.Mode != "" || entry.IncludePreview || entry.TagFilter != "" || entry.TagFilterMode != "" {
 			return importSubscription{}, fmt.Errorf("RSS sources cannot specify Git settings")
 		}
 		if err := validFeedURL(entry.URL); err != nil {
@@ -269,7 +270,7 @@ func (s *Store) importFile(r io.Reader, format string) error {
 			site = source.URL
 			folders = []string{gitFolderFor(source.Kind)}
 		}
-		result, err := tx.Exec(`INSERT INTO feeds(url,title,site,active,paused,git_provider,git_repo,git_mode,git_preview,icon_url,user_agent,git_tag_filter,site_override,icon_override,site_auto,source_kind,git_owner_type,git_include_subgroups,git_ignore_forks) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(url) DO NOTHING`, source.URL, entry.Title, site, enabled, entry.Paused && enabled, source.Provider, source.Repo, source.Mode, source.Preview, source.Icon, entry.UserAgent, source.TagFilter, entry.SiteOverride, entry.IconOverride, entry.SiteURL, source.Kind, source.OwnerType, source.IncludeSubgroups, source.IgnoreForks)
+		result, err := tx.Exec(`INSERT INTO feeds(url,title,site,active,paused,git_provider,git_repo,git_mode,git_preview,icon_url,user_agent,git_tag_filter,site_override,icon_override,site_auto,source_kind,git_owner_type,git_include_subgroups,git_ignore_forks,git_tag_filter_mode) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(url) DO NOTHING`, source.URL, entry.Title, site, enabled, entry.Paused && enabled, source.Provider, source.Repo, source.Mode, source.Preview, source.Icon, entry.UserAgent, source.TagFilter, entry.SiteOverride, entry.IconOverride, entry.SiteURL, source.Kind, source.OwnerType, source.IncludeSubgroups, source.IgnoreForks, tagFilterMode([]string{source.TagFilterMode}))
 		if err != nil {
 			return err
 		}

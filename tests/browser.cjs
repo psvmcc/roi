@@ -40,7 +40,7 @@ async function freePorts() {
           { name: 'Tool stable', tag_name: 'v2.0.0', prerelease: false, published_at: '2024-02-02T12:00:00Z', body: '# Highlights\n\n**Stable notes**\n\n- Fast\n- Safe' },
         ])); return;
       }
-      if (/^\/api\/v1\/repos\/team\/(tool|other)\/tags$/.test(gitPath)) { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify([{ name: 'v4.0.0', message: 'Stable tag notes', commit: { created: '2024-04-04T12:00:00Z' } }])); return; }
+      if (/^\/api\/v1\/repos\/team\/(tool|other)\/tags$/.test(gitPath)) { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify([{ name: 'v4.0.0', message: 'Stable tag notes', commit: { created: '2024-04-04T12:00:00Z' } }, { name: 'v4.0.0-lalala', message: 'Custom suffix', commit: { created: '2024-04-03T12:00:00Z' } }])); return; }
       if (req.url === '/broken') { res.statusCode = 503; res.end('temporarily unavailable'); return; }
       calls++;
       res.setHeader('Content-Type', 'application/rss+xml');
@@ -578,9 +578,33 @@ async function freePorts() {
     assert.equal(await gitRow.getAttribute('data-git-tag-filter'), 'v4.*');
     assert.equal((await get('subscription/list')).subscriptions.find(sub => sub.id === gitSubscription.id).iconUrl, gitSubscription.iconUrl);
     assert.ok(gitItems.items.every(item => item.title.startsWith('v4.')));
+    assert.ok(gitItems.items.some(item => item.title === 'v4.0.0-lalala'));
     await gitRow.getByRole('button', { name: 'Git source settings', exact: true }).click();
+
     assert.equal(await gitDialog.getByLabel('Tag filter', { exact: true }).inputValue(), 'v4.*');
-    await gitDialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+    assert.equal(await gitDialog.getByLabel('Tag filter syntax', { exact: true }).inputValue(), 'glob');
+    await gitDialog.getByLabel('Tag filter syntax', { exact: true }).selectOption('regex');
+    const strictTags = '^v[0-9]+\.[0-9]+\.[0-9]+$';
+    assert.equal(await gitDialog.getByLabel('Tag filter', { exact: true }).getAttribute('placeholder'), strictTags);
+    await gitDialog.getByLabel('Tag filter', { exact: true }).fill(strictTags);
+    await action(gitDialog.getByRole('button', { name: 'Save Git source', exact: true }), '/git-source');
+    assert.equal(await gitRow.getAttribute('data-git-tag-filter-mode'), 'regex');
+    const regexTags = (await get('stream/contents/' + gitSubscription.id)).items;
+    assert.ok(regexTags.some(item => item.title === 'v4.0.0'));
+    assert.ok(regexTags.every(item => item.title !== 'v4.0.0-lalala'));
+    await gitRow.getByRole('button', { name: 'Git source settings', exact: true }).click();
+    assert.equal(await gitDialog.getByLabel('Tag filter syntax', { exact: true }).inputValue(), 'regex');
+    assert.equal(await gitDialog.getByLabel('Tag filter', { exact: true }).inputValue(), strictTags);
+    await gitDialog.getByLabel('Tag filter', { exact: true }).fill('[');
+    const invalidRegex = page.waitForResponse(response => new URL(response.url()).pathname === '/git-source' && response.request().method() === 'POST');
+    await gitDialog.getByRole('button', { name: 'Save Git source', exact: true }).click();
+    assert.equal((await invalidRegex).status(), 400);
+    assert.equal(await gitDialog.isVisible(), true);
+    assert.ok((await gitDialog.locator('.dialog-error').innerText()).includes('regex'));
+    await gitDialog.getByLabel('Tag filter syntax', { exact: true }).selectOption('glob');
+    await gitDialog.getByLabel('Tag filter', { exact: true }).fill('v4.*');
+    await action(gitDialog.getByRole('button', { name: 'Save Git source', exact: true }), '/git-source');
+
     const gitTable = page.getByRole('table', { name: 'GIT Releases Feeds', exact: true });
     assert.equal(await feedTable.locator('[data-git-edit]').count(), 0);
     assert.equal(await gitTable.locator('[data-git-edit]').count(), 1);

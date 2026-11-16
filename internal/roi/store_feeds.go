@@ -33,19 +33,20 @@ type Feed struct {
 	Folders                                []string
 	GitProvider, GitRepo, GitMode, Icon    string
 	GitTagFilter                           string
+	GitTagFilterMode                       string
 	GitPreview                             bool
 	GitRevision                            int64
 }
 
 func (s *Store) Feeds() ([]Feed, error) {
-	rows, e := s.DB.Query(`SELECT f.id,f.url,f.title,f.site,f.active,f.paused,f.next_fetch,f.last_attempt,f.last_success,f.last_new,COALESCE((SELECT MAX(published) FROM entries WHERE feed_id=f.id),0),f.error,f.failures,f.git_provider,f.git_repo,f.git_mode,f.git_preview,f.git_revision,CASE WHEN f.icon_override<>'' THEN f.icon_override ELSE f.icon_url END,f.user_agent,f.git_tag_filter,COALESCE(s.count,0),COALESCE(s.unread,0),COALESCE(s.bytes,0),COALESCE(s.visible_unread,0),f.site_override,f.icon_override,f.icon_url,f.site_auto,CASE WHEN f.source_kind='rss' AND f.git_provider<>'' THEN 'git_releases' ELSE f.source_kind END,f.git_owner_type,f.git_owner_id,f.git_include_subgroups,f.repos_partial,f.git_ignore_forks FROM feeds f LEFT JOIN feed_stats s ON s.feed_id=f.id ORDER BY f.title`)
+	rows, e := s.DB.Query(`SELECT f.id,f.url,f.title,f.site,f.active,f.paused,f.next_fetch,f.last_attempt,f.last_success,f.last_new,COALESCE((SELECT MAX(published) FROM entries WHERE feed_id=f.id),0),f.error,f.failures,f.git_provider,f.git_repo,f.git_mode,f.git_preview,f.git_revision,CASE WHEN f.icon_override<>'' THEN f.icon_override ELSE f.icon_url END,f.user_agent,f.git_tag_filter,COALESCE(s.count,0),COALESCE(s.unread,0),COALESCE(s.bytes,0),COALESCE(s.visible_unread,0),f.site_override,f.icon_override,f.icon_url,f.site_auto,CASE WHEN f.source_kind='rss' AND f.git_provider<>'' THEN 'git_releases' ELSE f.source_kind END,f.git_owner_type,f.git_owner_id,f.git_include_subgroups,f.repos_partial,f.git_ignore_forks,f.git_tag_filter_mode FROM feeds f LEFT JOIN feed_stats s ON s.feed_id=f.id ORDER BY f.title`)
 	if e != nil {
 		return nil, e
 	}
 	fs := []Feed{}
 	for rows.Next() {
 		var f Feed
-		if e = rows.Scan(&f.ID, &f.URL, &f.Title, &f.Site, &f.Active, &f.Paused, &f.Next, &f.Attempt, &f.Success, &f.New, &f.Published, &f.Error, &f.Failures, &f.GitProvider, &f.GitRepo, &f.GitMode, &f.GitPreview, &f.GitRevision, &f.Icon, &f.UserAgent, &f.GitTagFilter, &f.Count, &f.Unread, &f.Bytes, &f.VisibleUnread, &f.SiteOverride, &f.IconOverride, &f.AutomaticIcon, &f.AutomaticSite, &f.Kind, &f.OwnerType, &f.OwnerID, &f.IncludeSubgroups, &f.ReposPartial, &f.IgnoreForks); e != nil {
+		if e = rows.Scan(&f.ID, &f.URL, &f.Title, &f.Site, &f.Active, &f.Paused, &f.Next, &f.Attempt, &f.Success, &f.New, &f.Published, &f.Error, &f.Failures, &f.GitProvider, &f.GitRepo, &f.GitMode, &f.GitPreview, &f.GitRevision, &f.Icon, &f.UserAgent, &f.GitTagFilter, &f.Count, &f.Unread, &f.Bytes, &f.VisibleUnread, &f.SiteOverride, &f.IconOverride, &f.AutomaticIcon, &f.AutomaticSite, &f.Kind, &f.OwnerType, &f.OwnerID, &f.IncludeSubgroups, &f.ReposPartial, &f.IgnoreForks, &f.GitTagFilterMode); e != nil {
 			rows.Close()
 			return nil, e
 		}
@@ -172,13 +173,14 @@ func (s *Store) SaveGitSource(id int64, g GitSource, iconOverride ...string) err
 	if g.Provider == "auto" {
 		return clientError("detect the Git service before saving")
 	}
-	if err := validateTagFilter(g.TagFilter); err != nil {
+	if err := validateTagFilter(g.TagFilter, g.TagFilterMode); err != nil {
 		return err
 	}
 	checked, err := parseGitSource(g.URL, g.Provider, g.Mode, g.Preview)
 	if err != nil {
 		return err
 	}
+	g.TagFilterMode = tagFilterMode([]string{g.TagFilterMode})
 	g.URL = checked.URL
 	g.Repo = checked.Repo
 	g.Mode = checked.Mode
@@ -195,7 +197,7 @@ func (s *Store) SaveGitSource(id int64, g GitSource, iconOverride ...string) err
 		if exists != 0 {
 			return clientError("repository is already subscribed; edit the existing source")
 		}
-		result, err := tx.Exec("INSERT INTO feeds(url,title,site,git_provider,git_repo,git_mode,git_preview,icon_url,git_tag_filter,icon_override,source_kind) VALUES(?,?,?,?,?,?,?,?,?,?,?)", g.URL, g.title(), g.URL, g.Provider, g.Repo, g.Mode, g.Preview, g.Icon, g.TagFilter, override, kindGitReleases)
+		result, err := tx.Exec("INSERT INTO feeds(url,title,site,git_provider,git_repo,git_mode,git_preview,icon_url,git_tag_filter,icon_override,source_kind,git_tag_filter_mode) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", g.URL, g.title(), g.URL, g.Provider, g.Repo, g.Mode, g.Preview, g.Icon, g.TagFilter, override, kindGitReleases, g.TagFilterMode)
 		if err != nil {
 			return err
 		}
@@ -204,7 +206,7 @@ func (s *Store) SaveGitSource(id int64, g GitSource, iconOverride ...string) err
 			return err
 		}
 	} else {
-		result, err := tx.Exec("UPDATE feeds SET git_mode=?,git_preview=?,git_tag_filter=?,icon_override=CASE WHEN ? THEN ? ELSE icon_override END,git_revision=git_revision+1,next_fetch=0,error='',failures=0 WHERE id=? AND url=? AND git_provider=? AND source_kind<>'git_repos'", g.Mode, g.Preview, g.TagFilter, len(iconOverride) > 0, override, id, g.URL, g.Provider)
+		result, err := tx.Exec("UPDATE feeds SET git_mode=?,git_preview=?,git_tag_filter=?,git_tag_filter_mode=?,icon_override=CASE WHEN ? THEN ? ELSE icon_override END,git_revision=git_revision+1,next_fetch=0,error='',failures=0 WHERE id=? AND url=? AND git_provider=? AND source_kind<>'git_repos'", g.Mode, g.Preview, g.TagFilter, g.TagFilterMode, len(iconOverride) > 0, override, id, g.URL, g.Provider)
 		if err != nil {
 			return err
 		}
@@ -215,6 +217,9 @@ func (s *Store) SaveGitSource(id int64, g GitSource, iconOverride ...string) err
 		if n == 0 {
 			return clientError("unknown Git source or repository changed")
 		}
+	}
+	if err = updateRegexTagMatches(tx, id, g.TagFilter, g.TagFilterMode); err != nil {
+		return err
 	}
 	if _, err = tx.Exec("INSERT OR IGNORE INTO folders(name) VALUES(?)", gitFolder); err != nil {
 		return err

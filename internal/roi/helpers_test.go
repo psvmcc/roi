@@ -197,6 +197,7 @@ func deviceLoginForm(t *testing.T, a *App) url.Values {
 
 func rollbackForkMigration(t *testing.T, db *sql.DB) {
 	t.Helper()
+	rollbackRegexMigration(t, db)
 	var version int
 	if err := db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		t.Fatal(err)
@@ -208,6 +209,23 @@ func rollbackForkMigration(t *testing.T, db *sql.DB) {
  ALTER TABLE entries DROP COLUMN git_fork;
  ALTER TABLE feeds DROP COLUMN git_ignore_forks;
  PRAGMA user_version=20;`); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func rollbackRegexMigration(t *testing.T, db *sql.DB) {
+	t.Helper()
+	var version int
+	if err := db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if version < 22 {
+		return
+	}
+	if _, err := db.Exec(`DROP TRIGGER entry_stats_insert; DROP TRIGGER entry_stats_delete; DROP TRIGGER entry_stats_update; DROP TRIGGER feed_stats_filter;` + entryStatsTriggers(true) + `
+ ALTER TABLE entries DROP COLUMN git_tag_match;
+ ALTER TABLE feeds DROP COLUMN git_tag_filter_mode;
+ PRAGMA user_version=21;`); err != nil {
 		t.Fatal(err)
 	}
 }

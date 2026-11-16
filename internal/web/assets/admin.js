@@ -371,6 +371,18 @@
       input.oninput = updateGitMode;
       form.querySelector('select[name=mode]').value = row ? row.dataset.gitMode : 'releases';
       form.querySelector('input[name=tag_filter]').value = row?.dataset.gitTagFilter || '';
+      const tagSyntax = form.querySelector('[name=tag_filter_mode]');
+      tagSyntax.value = row?.dataset.gitTagFilterMode || 'glob';
+      const updateTagSyntax = () => {
+        const regex = tagSyntax.value === 'regex';
+        form.querySelector('[name=tag_filter]').placeholder = regex ? '^v[0-9]+\.[0-9]+\.[0-9]+$' : 'v3.4.*';
+        dialog.querySelector('#git-tag-filter-help').textContent = regex
+          ? 'Optional, case-sensitive, matches the entire tag. Go/RE2 regex syntax; lookarounds and backreferences are not supported. Preview filtering still applies.'
+          : 'Optional, case-sensitive, matches the entire tag. Glob: * matches any number of characters; ? matches one. Applies to tags in both modes. Gitweb always tracks tags.';
+      };
+      tagSyntax.onchange = updateTagSyntax;
+      updateTagSyntax();
+
       form.querySelector('input[name=include_preview]').checked = row?.dataset.gitPreview === 'true';
       form.querySelector('[name=icon_override]').value = row?.dataset.iconOverride || '';
       form.querySelector('[name=icon_override]').placeholder = row?.dataset.iconUrl || 'Automatic icon';

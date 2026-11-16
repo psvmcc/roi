@@ -217,7 +217,7 @@ func (p *Poller) fetchGitweb(ctx context.Context, s GitSource, id int64) (*gofee
 	seen := map[string]bool{}
 	selected := []gitwebTag{}
 	choose := func(tag gitwebTag) {
-		if seen[tag.Name] || !matchesTag(s.TagFilter, tag.Name) || (!s.Preview && isPreviewTag(tag.Name)) {
+		if seen[tag.Name] || !matchesTag(s.TagFilter, tag.Name, s.TagFilterMode) || (!s.Preview && isPreviewTag(tag.Name)) {
 			return
 		}
 		seen[tag.Name] = true

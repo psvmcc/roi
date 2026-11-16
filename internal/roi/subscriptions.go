@@ -17,6 +17,7 @@ type roiFile struct {
 	Sources []roiSource `yaml:"sources"`
 }
 type roiSource struct {
+	TagFilterMode    string   `yaml:"tag_filter_mode,omitempty"`
 	IgnoreForks      *bool    `yaml:"ignore_forks,omitempty"`
 	OwnerType        string   `yaml:"owner_type,omitempty"`
 	IncludeSubgroups bool     `yaml:"include_subgroups,omitempty"`
@@ -48,7 +49,7 @@ func (s *Store) exportROI(ctx context.Context, w io.Writer) error {
 		return err
 	}
 	defer tx.Rollback()
-	rows, err := tx.QueryContext(ctx, `SELECT id,url,title,CASE WHEN site_auto<>'' THEN site_auto WHEN site_override='' THEN site ELSE '' END,active,paused,git_provider,git_mode,git_preview,icon_url,user_agent,git_tag_filter,site_override,icon_override,source_kind,git_owner_type,git_include_subgroups,git_ignore_forks FROM feeds ORDER BY url`)
+	rows, err := tx.QueryContext(ctx, `SELECT id,url,title,CASE WHEN site_auto<>'' THEN site_auto WHEN site_override='' THEN site ELSE '' END,active,paused,git_provider,git_mode,git_preview,icon_url,user_agent,git_tag_filter,site_override,icon_override,source_kind,git_owner_type,git_include_subgroups,git_ignore_forks,git_tag_filter_mode FROM feeds ORDER BY url`)
 	if err != nil {
 		return err
 	}
@@ -59,11 +60,14 @@ func (s *Store) exportROI(ctx context.Context, w io.Writer) error {
 		var provider, kind string
 		var enabled, ignoreForks bool
 		var entry roiSource
-		if err = rows.Scan(&id, &entry.URL, &entry.Title, &entry.SiteURL, &enabled, &entry.Paused, &provider, &entry.Mode, &entry.IncludePreview, &entry.IconURL, &entry.UserAgent, &entry.TagFilter, &entry.SiteOverride, &entry.IconOverride, &kind, &entry.OwnerType, &entry.IncludeSubgroups, &ignoreForks); err != nil {
+		if err = rows.Scan(&id, &entry.URL, &entry.Title, &entry.SiteURL, &enabled, &entry.Paused, &provider, &entry.Mode, &entry.IncludePreview, &entry.IconURL, &entry.UserAgent, &entry.TagFilter, &entry.SiteOverride, &entry.IconOverride, &kind, &entry.OwnerType, &entry.IncludeSubgroups, &ignoreForks, &entry.TagFilterMode); err != nil {
 			rows.Close()
 			return err
 		}
 		entry.Enabled = &enabled
+		if entry.TagFilterMode == "glob" || kind == kindGitRepos || provider == "" {
+			entry.TagFilterMode = ""
+		}
 		if kind != kindGitRepos {
 			entry.OwnerType = ""
 			entry.IncludeSubgroups = false

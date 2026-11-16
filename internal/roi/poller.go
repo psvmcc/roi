@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -248,7 +249,7 @@ func (p *Poller) fetchReserved(ctx context.Context, id int64, reserved string) {
 	var automatic rssIcon
 	var failures int
 	var git GitSource
-	e := p.store.DB.QueryRowContext(ctx, "SELECT url,title,etag,modified,failures,git_provider,git_repo,git_mode,git_preview,git_revision,icon_url,user_agent,git_tag_filter,site,site_override,icon_site,icon_checked,source_kind,git_owner_type,git_owner_id,git_include_subgroups,git_ignore_forks FROM feeds WHERE id=? AND active=1 AND paused=0", id).Scan(&raw, &title, &etag, &modified, &failures, &git.Provider, &git.Repo, &git.Mode, &git.Preview, &git.Revision, &git.Icon, &userAgent, &git.TagFilter, &savedSite, &siteOverride, &iconSite, &iconChecked, &git.Kind, &git.OwnerType, &git.OwnerID, &git.IncludeSubgroups, &git.IgnoreForks)
+	e := p.store.DB.QueryRowContext(ctx, "SELECT url,title,etag,modified,failures,git_provider,git_repo,git_mode,git_preview,git_revision,icon_url,user_agent,git_tag_filter,site,site_override,icon_site,icon_checked,source_kind,git_owner_type,git_owner_id,git_include_subgroups,git_ignore_forks,git_tag_filter_mode FROM feeds WHERE id=? AND active=1 AND paused=0", id).Scan(&raw, &title, &etag, &modified, &failures, &git.Provider, &git.Repo, &git.Mode, &git.Preview, &git.Revision, &git.Icon, &userAgent, &git.TagFilter, &savedSite, &siteOverride, &iconSite, &iconChecked, &git.Kind, &git.OwnerType, &git.OwnerID, &git.IncludeSubgroups, &git.IgnoreForks, &git.TagFilterMode)
 	if e != nil {
 		return
 	}
@@ -451,14 +452,21 @@ func (p *Poller) saveEntriesRevision(ctx context.Context, id int64, f *gofeed.Fe
 	defer tx.Rollback()
 	var active bool
 	var revision int64
-	var sourceURL string
-	if e = tx.QueryRowContext(ctx, "SELECT active,git_revision,url FROM feeds WHERE id=?", id).Scan(&active, &revision, &sourceURL); e == sql.ErrNoRows {
+	var sourceURL, tagPattern, tagMode string
+	if e = tx.QueryRowContext(ctx, "SELECT active,git_revision,url,git_tag_filter,git_tag_filter_mode FROM feeds WHERE id=?", id).Scan(&active, &revision, &sourceURL, &tagPattern, &tagMode); e == sql.ErrNoRows {
 		return 0, nil
 	} else if e != nil {
 		return 0, e
 	}
 	if !active || (expected >= 0 && revision != expected) {
 		return 0, nil
+	}
+	var tagMatcher *regexp.Regexp
+	if tagMode == "regex" {
+		tagMatcher, e = compileTagFilter(tagPattern, tagMode)
+		if e != nil {
+			return 0, e
+		}
 	}
 	added := 0
 	for i := len(f.Items) - 1; i >= 0; i-- {
@@ -471,6 +479,7 @@ func (p *Poller) saveEntriesRevision(ctx context.Context, id int64, f *gofeed.Fe
 			h := sha256.Sum256([]byte(item.Title + "\x00" + item.Published))
 			guid = fmt.Sprintf("sha256:%x", h)
 		}
+		tagMatch := tagMatcher == nil || tagMatcher.MatchString(strings.TrimPrefix(guid, "git:"))
 		preview := item.Custom["roi_preview"] == "1"
 		fork := item.Custom["roi_fork"] == "1"
 		content := item.Content
@@ -496,7 +505,7 @@ func (p *Poller) saveEntriesRevision(ctx context.Context, id int64, f *gofeed.Fe
 			return 0, e
 		}
 		if e == sql.ErrNoRows {
-			res, err := tx.ExecContext(ctx, `INSERT INTO entries(feed_id,guid,title,url,content,author,published,received,updated,git_preview,git_fork) SELECT ?,?,?,?,?,?,?,?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM tombstones WHERE feed_id=? AND guid IN (?,?))`, id, guid, item.Title, item.Link, content, author, published, received, now, preview, fork, id, guid, tombstoneDigest(guid))
+			res, err := tx.ExecContext(ctx, `INSERT INTO entries(feed_id,guid,title,url,content,author,published,received,updated,git_preview,git_fork,git_tag_match) SELECT ?,?,?,?,?,?,?,?,?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM tombstones WHERE feed_id=? AND guid IN (?,?))`, id, guid, item.Title, item.Link, content, author, published, received, now, preview, fork, tagMatch, id, guid, tombstoneDigest(guid))
 			if err != nil {
 				return 0, err
 			}
@@ -509,7 +518,7 @@ func (p *Poller) saveEntriesRevision(ctx context.Context, id int64, f *gofeed.Fe
 			if !sourceDated {
 				published = oldPublished
 			}
-			_, e = tx.ExecContext(ctx, `UPDATE entries SET title=?,url=?,content=?,author=?,published=?,updated=?,git_preview=?,git_fork=? WHERE id=? AND (title<>? OR url<>? OR content<>? OR author<>? OR published<>? OR git_preview<>? OR git_fork<>?)`, item.Title, item.Link, content, author, published, now, preview, fork, oldID, item.Title, item.Link, content, author, published, preview, fork)
+			_, e = tx.ExecContext(ctx, `UPDATE entries SET title=?,url=?,content=?,author=?,published=?,updated=?,git_preview=?,git_fork=?,git_tag_match=? WHERE id=? AND (title<>? OR url<>? OR content<>? OR author<>? OR published<>? OR git_preview<>? OR git_fork<>? OR git_tag_match<>?)`, item.Title, item.Link, content, author, published, now, preview, fork, tagMatch, oldID, item.Title, item.Link, content, author, published, preview, fork, tagMatch)
 			if e != nil {
 				return 0, e
 			}

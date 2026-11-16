@@ -61,3 +61,17 @@ END;
 	sql = strings.ReplaceAll(sql, "feed_id=NEW.id AND is_read=0 AND", "feed_id=NEW.id AND is_read=0 AND (NEW.source_kind<>'git_repos' OR NEW.git_ignore_forks=0 OR git_fork=0) AND")
 	return sql
 }
+
+func regexStatsTriggers() string {
+	sql := entryStatsTriggers(true)
+	for _, prefix := range []string{"NEW.", "OLD."} {
+		old := "substr(" + prefix + "guid,5) GLOB git_tag_filter"
+		sql = strings.ReplaceAll(sql, old, "CASE WHEN git_tag_filter_mode='regex' THEN "+prefix+"git_tag_match ELSE "+old+" END")
+	}
+	old := "substr(guid,5) GLOB NEW.git_tag_filter"
+	sql = strings.ReplaceAll(sql, old, "CASE WHEN NEW.git_tag_filter_mode='regex' THEN git_tag_match ELSE "+old+" END")
+	sql = strings.ReplaceAll(sql, "git_preview,git_fork ON entries", "git_preview,git_fork,git_tag_match ON entries")
+	sql = strings.ReplaceAll(sql, "git_tag_filter,git_ignore_forks ON feeds", "git_tag_filter,git_ignore_forks,git_tag_filter_mode ON feeds")
+	sql = strings.ReplaceAll(sql, "OLD.git_ignore_forks<>NEW.git_ignore_forks BEGIN", "OLD.git_ignore_forks<>NEW.git_ignore_forks OR OLD.git_tag_filter_mode<>NEW.git_tag_filter_mode BEGIN")
+	return sql
+}

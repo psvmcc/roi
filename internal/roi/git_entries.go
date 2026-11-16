@@ -68,7 +68,7 @@ func (p *Poller) gitItem(ctx context.Context, s GitSource, id int64, release git
 		tag = release.Name
 	}
 	preview := release.Prerelease || release.Upcoming || isPreviewTag(tag)
-	if release.Draft || tag == "" || !matchesTag(s.TagFilter, tag) || (!s.Preview && preview) {
+	if release.Draft || tag == "" || !matchesTag(s.TagFilter, tag, s.TagFilterMode) || (!s.Preview && preview) {
 		return nil, nil
 	}
 	date := gitDate(release.Published, release.Released, release.Created, release.Commit.CreatedAt, release.Commit.Created, release.Commit.Committed, release.Commit.Timestamp)
