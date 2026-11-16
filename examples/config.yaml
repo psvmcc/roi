@@ -68,6 +68,7 @@ security:
 
 # Optional Git API tokens, scoped to the repository host (never shown in the admin).
 # Public repositories work without tokens, subject to the service's rate limits.
+# GitHub tag feeds use commit-date ordering only when a token is configured.
 git:
   tokens:
     github.com: "" # Optional GitHub token; keep real credentials in a local config.

@@ -121,6 +121,12 @@ func (p *Poller) detectGit(ctx context.Context, s GitSource) (GitSource, error) 
 	}
 	// Verify the repository API before storing a subscription; never save an HTML error page as a feed.
 	budget = gitBudget{Limit: p.config.Poll.MaxBytes}
+	if validated.Provider == "github" && validated.Mode == "tags" && p.gitToken(validated) != "" {
+		if _, err := p.githubTagsPage(ctx, validated, "", 1, &budget); err != nil {
+			return s, err
+		}
+		return validated, nil
+	}
 	raw := validated.endpoint() + "?page=1&per_page=1&limit=1"
 	b, err := p.gitGet(ctx, raw, p.gitToken(validated), &budget)
 	if err != nil {

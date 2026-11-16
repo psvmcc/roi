@@ -18,6 +18,9 @@ func (p *Poller) fetchGit(ctx context.Context, s GitSource, id int64) (*gofeed.F
 	if s.Provider == "gitweb" {
 		return p.fetchGitweb(ctx, s, id)
 	}
+	if s.Provider == "github" && s.Mode == "tags" && p.gitToken(s) != "" {
+		return p.fetchGitHubTags(ctx, s, id)
+	}
 	budget := gitBudget{Limit: p.config.Poll.MaxBytes}
 	feed := &gofeed.Feed{Title: s.title(), Link: s.URL}
 	seen := map[string]bool{}

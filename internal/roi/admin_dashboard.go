@@ -116,6 +116,13 @@ func (a *App) adminDashboard(w http.ResponseWriter, r *http.Request, cookie *htt
 			return
 		}
 		for _, f := range allFeeds {
+			if f.GitProvider == "github" && f.GitMode == "tags" {
+				f.GitTagOrder = "API default order (no token)"
+				if a.poller.gitToken(GitSource{URL: f.URL}) != "" {
+					f.GitTagOrder = "Commit date order"
+				}
+			}
+
 			if u, err := url.Parse(f.URL); err == nil && f.Active && !f.Paused {
 				ready, busy := a.poller.hostStatus(hostGroup(u))
 				f.HostQueued = busy && f.Next <= time.Now().Unix()

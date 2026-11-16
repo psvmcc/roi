@@ -354,9 +354,9 @@ func TestGitHubTagDatesCachedContentsAndHostScopedToken(t *testing.T) {
 		if r.URL.Host != "api.github.com" || r.Header.Get("Authorization") != "Bearer scoped-token" {
 			t.Error("wrong token scope", r.URL)
 		}
-		if strings.HasSuffix(r.URL.Path, "/tags") {
+		if r.URL.Path == "/graphql" {
 			pages++
-			return gitResponse(r, 200, `[{"name":"v1.0.0","commit":{"sha":"abc123"}}]`), nil
+			return githubTestPage(r, []githubTagRef{githubTestCommit("v1.0.0", "abc123", "2020-05-06T12:00:00Z", "**Commit notes**")}, false, ""), nil
 		}
 		if strings.HasSuffix(r.URL.Path, "/commits/abc123") {
 			commits++
@@ -372,8 +372,8 @@ func TestGitHubTagDatesCachedContentsAndHostScopedToken(t *testing.T) {
 	id := storeGit(t, a, s)
 	a.poller.fetch(t.Context(), id)
 	a.poller.fetch(t.Context(), id)
-	if commits != 1 || pages != 3 {
-		t.Fatal("tag commit metadata was not cached", commits, pages)
+	if commits != 0 || pages != 3 {
+		t.Fatal("GraphQL must include commit metadata without detail requests", commits, pages)
 	}
 	var published int64
 	var content string

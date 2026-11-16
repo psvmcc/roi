@@ -1,9 +1,11 @@
 package roi
 
 import (
+	"bytes"
 	"compress/flate"
 	"compress/gzip"
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -55,9 +57,18 @@ func compressedBodyError(err error) bool {
 // API responses, discovery and commit lookups share a bounded budget and the
 // same DNS/IP checks as ordinary feeds. Redirects cannot forward host credentials.
 func (p *Poller) gitGet(ctx context.Context, raw, token string, budget *gitBudget, nextPage ...*bool) ([]byte, error) {
+	return p.gitRequest(ctx, http.MethodGet, raw, token, nil, budget, nextPage...)
+}
+
+// POST is used only for fixed, read-only GraphQL queries. Responses are not
+// stored in the GET/ETag cache: the query and cursor determine their contents.
+func (p *Poller) gitPost(ctx context.Context, raw, token string, payload []byte, budget *gitBudget) ([]byte, error) {
+	return p.gitRequest(ctx, http.MethodPost, raw, token, payload, budget)
+}
+func (p *Poller) gitRequest(ctx context.Context, method, raw, token string, payload []byte, budget *gitBudget, nextPage ...*bool) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, p.config.timeout())
 	defer cancel()
-	body, err := p.gitGetAttempt(ctx, raw, token, budget, false, nextPage...)
+	body, err := p.gitRequestAttempt(ctx, method, raw, token, payload, budget, false, nextPage...)
 	var compression *gitCompressionError
 	if !errors.As(err, &compression) {
 		return body, err
@@ -66,10 +77,10 @@ func (p *Poller) gitGet(ctx context.Context, raw, token string, budget *gitBudge
 		return nil, err
 	}
 	p.metrics.GetOrCreateCounter("roi_git_identity_retries_total").Inc()
-	return p.gitGetAttempt(ctx, raw, token, budget, true, nextPage...)
+	return p.gitRequestAttempt(ctx, method, raw, token, payload, budget, true, nextPage...)
 }
 
-func (p *Poller) gitGetAttempt(ctx context.Context, raw, token string, budget *gitBudget, identity bool, nextPage ...*bool) ([]byte, error) {
+func (p *Poller) gitRequestAttempt(ctx context.Context, method, raw, token string, payload []byte, budget *gitBudget, identity bool, nextPage ...*bool) ([]byte, error) {
 	if budget.Received >= budget.Limit {
 		return nil, p.gitSizeError(raw, budget)
 	}
@@ -79,7 +90,7 @@ func (p *Poller) gitGetAttempt(ctx context.Context, raw, token string, budget *g
 			return nil, &gitHTTPError{http.StatusTooManyRequests, retry}
 		}
 	}
-	req, err := http.NewRequestWithContext(ctx, "GET", raw, nil)
+	req, err := http.NewRequestWithContext(ctx, method, raw, bytes.NewReader(payload))
 	if err != nil {
 		return nil, err
 	}
@@ -88,6 +99,9 @@ func (p *Poller) gitGetAttempt(ctx context.Context, raw, token string, budget *g
 		req.Header.Set("Accept-Encoding", "identity")
 	}
 	req.Header.Set("Accept", "application/json")
+	if method == http.MethodPost {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	if q, e := gitwebQuery(req.URL.RawQuery); e == nil && q.Get("p") != "" {
 		req.Header.Set("Accept", "text/html, application/xhtml+xml")
 	}
@@ -98,7 +112,11 @@ func (p *Poller) gitGetAttempt(ctx context.Context, raw, token string, budget *g
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	cacheKey := gitCacheKey(ctx, raw, token)
-	cached, cacheErr := p.cachedGit(ctx, cacheKey)
+	var cached gitCacheEntry
+	cacheErr := sql.ErrNoRows
+	if method == http.MethodGet {
+		cached, cacheErr = p.cachedGit(ctx, cacheKey)
+	}
 	if cacheErr != nil && !gitCacheMissing(cacheErr) {
 		return nil, cacheErr
 	}
@@ -112,6 +130,9 @@ func (p *Poller) gitGetAttempt(ctx context.Context, raw, token string, budget *g
 	}
 	client := *p.client
 	client.CheckRedirect = func(next *http.Request, via []*http.Request) error {
+		if method != http.MethodGet {
+			return fmt.Errorf("GraphQL redirects are not allowed")
+		}
 		if len(via) >= 5 || next.URL.Host != req.URL.Host || next.URL.Scheme != req.URL.Scheme {
 			return fmt.Errorf("git request redirect outside its origin")
 		}
@@ -161,8 +182,10 @@ func (p *Poller) gitGetAttempt(ctx context.Context, raw, token string, budget *g
 	if len(nextPage) > 0 {
 		*nextPage[0] = hasNext
 	}
-	if err = p.cacheGit(ctx, cacheKey, gitCacheEntry{ETag: resp.Header.Get("ETag"), Modified: resp.Header.Get("Last-Modified"), Body: b, Next: hasNext}); err != nil {
-		return nil, err
+	if method == http.MethodGet {
+		if err = p.cacheGit(ctx, cacheKey, gitCacheEntry{ETag: resp.Header.Get("ETag"), Modified: resp.Header.Get("Last-Modified"), Body: b, Next: hasNext}); err != nil {
+			return nil, err
+		}
 	}
 	return b, nil
 }

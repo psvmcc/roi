@@ -10,6 +10,7 @@ import (
 )
 
 type Feed struct {
+	GitTagOrder                            string
 	Kind, OwnerType                        string
 	OwnerID                                int64
 	IncludeSubgroups, ReposPartial         bool
